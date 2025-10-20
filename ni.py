@@ -52,8 +52,48 @@ class Lattice():
             (L, H)
     """
 
-    def __init__(self):
+    def __init__(self, c_levels: list[list[str]] = [['L'], ['H']], i_levels: list[list[str]] = [['H'], ['L']]):
         self.elements: dict[str, LatticeElement] = {}
+        q = Queue()
+
+        c_dict = {}
+        i_dict = {}
+        for c_level_idx in range(len(c_levels)):
+            for c_level in c_levels[c_level_idx]:
+                c_dict[c_level] = c_level_idx
+        for i_level_idx in range(len(i_levels)):
+            for i_level in i_levels[i_level_idx]:
+                i_dict[i_level] = i_level_idx
+        lower = f'{c_levels[0][0]},{i_levels[0][0]}'
+        self.add_element(LatticeElement(c_levels[0][0], i_levels[0][0]))
+        q.put(lower)
+        while not q.empty():
+            current = q.get()
+            c, i = current.split(',')
+            c_idx = c_dict[c]
+            i_idx = i_dict[i]
+            if c_idx + 1 < len(c_levels):
+                for next_c in c_levels[c_idx + 1]:
+                    next_elem = f'{next_c},{i}'
+                    if next_elem not in self.elements:
+                        self.add_element(LatticeElement(next_c, i, lower={current}))
+                        q.put(next_elem)
+                    else:
+                        if current == 'A,L' and next_elem == 'H,L':
+                            print("Debug")
+                            print(self.elements[current].upper)
+                            print(self.elements[next_elem].lower)
+                        self.elements[next_elem].add_lower(current)
+                        self.elements[current].add_upper(next_elem)
+            if i_idx + 1 < len(i_levels):
+                for next_i in i_levels[i_idx + 1]:
+                    next_elem = f'{c},{next_i}'
+                    if next_elem not in self.elements:
+                        self.add_element(LatticeElement(c, next_i, lower={current}))
+                        q.put(next_elem)
+                    else:
+                        self.elements[next_elem].add_lower(current)
+                        self.elements[current].add_upper(next_elem)
 
     def __str__(self):
         return '\n'.join([str(elem) for elem in self.elements.values()])
@@ -129,53 +169,3 @@ class Lattice():
         """
         glb_key = self._bfs_common_bound(str(elem1), str(elem2), 'down')
         return self.elements[glb_key] if glb_key else None
-    
-def build_lattice(c_levels: list[list[str]], i_levels: list[list[str]]) -> Lattice:
-    lattice = Lattice()
-    q = Queue()
-
-    c_dict = {}
-    i_dict = {}
-    for c_level_idx in range(len(c_levels)):
-        for c_level in c_levels[c_level_idx]:
-            c_dict[c_level] = c_level_idx
-    for i_level_idx in range(len(i_levels)):
-        for i_level in i_levels[i_level_idx]:
-            i_dict[i_level] = i_level_idx
-    lower = f'{c_levels[0][0]},{i_levels[0][0]}'
-    lattice.add_element(LatticeElement(c_levels[0][0], i_levels[0][0]))
-    q.put(lower)
-    while not q.empty():
-        current = q.get()
-        c, i = current.split(',')
-        c_idx = c_dict[c]
-        i_idx = i_dict[i]
-        if c_idx + 1 < len(c_levels):
-            for next_c in c_levels[c_idx + 1]:
-                next_elem = f'{next_c},{i}'
-                if next_elem not in lattice.elements:
-                    lattice.add_element(LatticeElement(next_c, i, lower={current}))
-                    q.put(next_elem)
-                else:
-                    if current == 'A,L' and next_elem == 'H,L':
-                        print("Debug")
-                        print(lattice.elements[current].upper)
-                        print(lattice.elements[next_elem].lower)
-                    lattice.elements[next_elem].add_lower(current)
-                    lattice.elements[current].add_upper(next_elem)
-        if i_idx + 1 < len(i_levels):
-            for next_i in i_levels[i_idx + 1]:
-                next_elem = f'{c},{next_i}'
-                if next_elem not in lattice.elements:
-                    lattice.add_element(LatticeElement(c, next_i, lower={current}))
-                    q.put(next_elem)
-                else:
-                    lattice.elements[next_elem].add_lower(current)
-                    lattice.elements[current].add_upper(next_elem)
-    return lattice
-
-if __name__ == "__main__":
-    c_levels = [['L'], ['A', 'B'], ['C'], ['H']]
-    i_levels = [['H'], ['L']]
-    lattice = build_lattice(c_levels, i_levels)
-    lattice.dump_lattice()
