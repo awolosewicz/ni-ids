@@ -292,3 +292,7 @@ class NICmd(cmd.Cmd):
         "Exit the NI command interface."
         print("Exiting NI command interface.")
         return True
+    
+    def do_quit(self, arg):
+        "Exit the NI command interface."
+        return self.do_exit(arg)
