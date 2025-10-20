@@ -1,6 +1,6 @@
 from queue import PriorityQueue, Queue
 import cmd
-from langchain_core.runnables.graph_ascii import draw_ascii
+from dagascii.dagascii import draw as draw_ascii
 from ipaddress import IPv4Address, IPv6Address
 from scapy.layers.inet import IP
 from scapy.packet import Raw
@@ -115,17 +115,12 @@ class Lattice():
             print(f"  Lower: {elem.lower}")
 
     def view_lattice(self):
-        vertices = {}
-        elem_to_vert = {}
+        vertices = []
         edges = []
-        ctr = 1
         for element in self.elements.values():
-            vertices[ctr] = str(element)
-            elem_to_vert[str(element)] = ctr
-            ctr += 1
-        for element in self.elements.values():
-            for lower_key in element.lower:
-                edges.append((elem_to_vert[str(element)], elem_to_vert[lower_key], None, None))
+            vertices.append(str(element))
+            for upper_key in element.upper:
+                edges.append((str(element), upper_key))
         print(draw_ascii(vertices, edges))
 
     def add_element(self, element: LatticeElement):
