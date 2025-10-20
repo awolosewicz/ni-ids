@@ -2,6 +2,11 @@ from queue import PriorityQueue, Queue
 import cmd
 from langchain_core.runnables.graph_ascii import draw_ascii
 from ipaddress import IPv4Address, IPv6Address
+from scapy.layers.inet import IP
+from scapy.packet import Raw
+from scapy.sendrecv import send, sr1
+from ni_header import NIHeader
+import ni_header
 
 class LatticeElement():
     """
@@ -56,6 +61,9 @@ class Lattice():
 
     def __init__(self, c_levels: list[list[str]] = [['L'], ['H']], i_levels: list[list[str]] = [['H'], ['L']]):
         self.elements: dict[str, LatticeElement] = {}
+        self.element_ids: dict[str, int] = {}
+        self.ids_element: dict[int, str] = {}
+        self.id_ctr = 1
         q = Queue()
 
         c_dict = {}
@@ -123,6 +131,9 @@ class Lattice():
     def add_element(self, element: LatticeElement):
         key = f"{element.c},{element.i}"
         self.elements[key] = element
+        self.element_ids[key] = self.id_ctr
+        self.ids_element[self.id_ctr] = key
+        self.id_ctr += 1
         found_uppers = []
         for upper_key in element.upper:
             if upper_key in self.elements:
@@ -335,11 +346,9 @@ class NICmd(cmd.Cmd):
     def __init__(self, host: str, config_file: str = ''):
         super().__init__()
         self.nicxt = NIContext(config_file=config_file)
-        self.host = None
-        if host in self.nicxt.hosts:
-            self.host = self.nicxt.hosts[host]
-        else:
+        if host not in self.nicxt.hosts:
             raise ValueError(f"Host '{host}' not found in context.")
+        self.host = self.nicxt.hosts[host]
         self.prompt = f"{self.host.name}> "
         print(f"Using host: {self.host.name} with address {self.host.address}")
 
@@ -462,6 +471,31 @@ class NICmd(cmd.Cmd):
             var.value = None
             var.has_value = False
         print("All variable values cleared.")
+
+    def do_send_packet(self, arg):
+        "Send a packet from the current host: send_packet <dest_host> <confidentiality> <integrity> <encrypted> <data>"
+        args = arg.split()
+        if len(args) < 5:
+            print("Usage: send_packet <dest_host> <confidentiality> <integrity> <encrypted> <data>")
+            return
+        dest_host_name = args[0]
+        if dest_host_name not in self.nicxt.hosts:
+            print(f"Destination host '{dest_host_name}' not found.")
+            return
+        dest_host = self.nicxt.hosts[dest_host_name]
+        level = f"{args[1]},{args[2]}"
+        encrypted = int(args[3])
+        data = ''.join(args[4:])
+        if level not in self.nicxt.lattice.elements:
+            print(f"Security level {level} not found in lattice.")
+            return
+        signature = 0  # TODO: signature generation
+        
+        pkt = IP(dst=str(dest_host.address))/NIHeader(level=self.nicxt.lattice.element_ids[level],
+                                                      enc=encrypted, sig=signature)/Raw(load=data.encode())
+        send(pkt)
+        print(f"Packet sent from {self.host.name} to {dest_host.name}.")
+
 
     def do_exit(self, arg):
         "Exit the NI command interface."
