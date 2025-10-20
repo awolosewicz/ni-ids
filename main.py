@@ -1,5 +1,6 @@
-from ni import NIContext
+from ni import NICmd
+import cmd
 
 if __name__ == "__main__":
-    nicxt = NIContext('config.txt')
-    nicxt.lattice.dump_lattice()
+    maincmd = NICmd()
+    maincmd.cmdloop()

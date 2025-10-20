@@ -1,5 +1,6 @@
 from queue import PriorityQueue, Queue
-
+import cmd
+from langchain_core.runnables.graph_ascii import draw_ascii
 
 class LatticeElement():
     """
@@ -104,6 +105,20 @@ class Lattice():
             print(f"  Upper: {elem.upper}")
             print(f"  Lower: {elem.lower}")
 
+    def view_lattice(self):
+        vertices = {}
+        elem_to_vert = {}
+        edges = []
+        ctr = 1
+        for element in self.elements.values():
+            vertices[ctr] = str(element)
+            elem_to_vert[str(element)] = ctr
+            ctr += 1
+        for element in self.elements.values():
+            for lower_key in element.lower:
+                edges.append((elem_to_vert[str(element)], elem_to_vert[lower_key], None, None))
+        print(draw_ascii(vertices, edges))
+
     def add_element(self, element: LatticeElement):
         key = f"{element.c},{element.i}"
         self.elements[key] = element
@@ -170,6 +185,25 @@ class Lattice():
         glb_key = self._bfs_common_bound(str(elem1), str(elem2), 'down')
         return self.elements[glb_key] if glb_key else None
     
+class NINode():
+    """
+    A node in a non-interference information flow graph. Has the following attributes:
+    - name: the name of the node
+    - level: the security level of the node (a LatticeElement)
+    - edges: a set of names of nodes this node has edges to
+    """
+
+    def __init__(self, name: str, level: LatticeElement):
+        self.name = name
+        self.level = level
+        self.edges: set[str] = set()
+
+    def add_edge(self, to_node: str):
+        self.edges.add(to_node)
+
+    def __repr__(self):
+        return f"NINode(name={self.name}, level={self.level}, edges={self.edges})"
+    
 class NIContext():
     """
     A context built from a given configuration file. Holds the following:
@@ -178,7 +212,14 @@ class NIContext():
     - lattice: the security lattice used in this context
     """
 
-    def __init__(self, config_file: str):
+    def __init__(self, config_file: str = ''):
+        self.c_levels: list[list[str]] = []
+        self.i_levels: list[list[str]] = []
+        self.lattice: Lattice = Lattice()
+        if config_file:
+            self.build_from_config(config_file)
+
+    def build_from_config(self, config_file: str):
         self.c_levels: list[list[str]] = []
         self.i_levels: list[list[str]] = []
         self.lattice: Lattice
@@ -199,11 +240,55 @@ class NIContext():
             elif line == '[Integrity Levels]':
                 mode = 'i'
                 continue
+            elif line == '[Resources]':
+                mode = 'r'
+                continue
             if mode == 'c':
                 levels = [lvl.strip() for lvl in line.split(',')]
                 self.c_levels.append(levels)
             elif mode == 'i':
                 levels = [lvl.strip() for lvl in line.split(',')]
                 self.i_levels.append(levels)
-        
+            elif mode == 'r':
+                # Resources parsing can be implemented here if needed
+                pass
         self.lattice = Lattice(self.c_levels, self.i_levels)
+
+class NICmd(cmd.Cmd):
+    """
+    Command-line interface for interacting with the NIContext.
+    """
+
+    intro = "Non-Interference Information Flow Control System. Type 'help' for commands."
+    prompt = "ni> "
+
+    def __init__(self):
+        super().__init__()
+        self.nicxt = NIContext()
+
+    def do_load_config(self, arg):
+        "Load a configuration file: load_config <filename>"
+        filename = arg.strip()
+        if not filename:
+            print("Please provide a configuration file name.")
+            return
+        try:
+            self.nicxt.build_from_config(filename)
+            print(f"Configuration loaded from {filename}.")
+        except Exception as e:
+            print(f"Error loading configuration: {e}")
+
+    def do_show_lattice(self, arg):
+        "Show the security lattice: show_lattice <'view'|'dump'>"
+        mode = arg.strip().lower()
+        if mode == 'dump':
+            self.nicxt.lattice.dump_lattice()
+        elif mode == 'view':
+            self.nicxt.lattice.view_lattice()
+        else:
+            print("Invalid argument. Use 'view' or 'dump'.")
+
+    def do_exit(self, arg):
+        "Exit the NI command interface."
+        print("Exiting NI command interface.")
+        return True

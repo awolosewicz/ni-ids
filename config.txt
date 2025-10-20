@@ -1,0 +1,13 @@
+[Confidentiality Levels]
+# bottom to top
+L
+A,B
+C
+H
+[Integrity Levels]
+# bottom to top
+H
+L
+[Resources]
+# Name,Type,C,I
+h1,N,L,H
