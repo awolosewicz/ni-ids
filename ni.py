@@ -302,8 +302,26 @@ class NIContext():
                 levels = [lvl.strip() for lvl in line.split(',')]
                 self.i_levels.append(levels)
             elif mode == 'r':
-                # Resources parsing can be implemented here if needed
-                pass
+                parts = [part.strip() for part in line.split(',')]
+                name = parts[0]
+                rtype = parts[1]
+                if rtype == 'h':
+                    c_level = parts[2]
+                    i_level = parts[3]
+                    address_str = parts[4]
+                    level_key = f"{c_level},{i_level}"
+                    if level_key not in self.lattice.elements:
+                        raise ValueError(f"Security level {level_key} not found in lattice.")
+                    level = self.lattice.elements[level_key]
+                    try:
+                        if ':' in address_str:
+                            address = IPv6Address(address_str)
+                        else:
+                            address = IPv4Address(address_str)
+                    except ValueError:
+                        raise ValueError(f"Invalid IP address: {address_str}")
+                    host = NIHost(name=name, level=level, address=address)
+                    self.hosts[name] = host
         self.lattice = Lattice(self.c_levels, self.i_levels)
 
 class NICmd(cmd.Cmd):
@@ -314,9 +332,16 @@ class NICmd(cmd.Cmd):
     intro = "Non-Interference Information Flow Control System. Type 'help' for commands."
     prompt = "ni> "
 
-    def __init__(self):
+    def __init__(self, host: str, config_file: str = ''):
         super().__init__()
-        self.nicxt = NIContext()
+        self.nicxt = NIContext(config_file=config_file)
+        self.host = None
+        if host in self.nicxt.hosts:
+            self.host = self.nicxt.hosts[host]
+        else:
+            raise ValueError(f"Host '{host}' not found in context.")
+        self.prompt = f"{self.host.name}> "
+        print(f"Using host: {self.host.name} with address {self.host.address}")
 
     def do_load_config(self, arg):
         "Load a configuration file: load_config <filename>"

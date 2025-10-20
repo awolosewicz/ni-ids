@@ -9,5 +9,5 @@ H
 H
 L
 [Resources]
-# Name,Type,C,I
-h1,N,L,H
+h1,h,L,L,10.0.1.11
+h2,h,H,H,10.0.1.12
