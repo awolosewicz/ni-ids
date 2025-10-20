@@ -409,6 +409,35 @@ class NICmd(cmd.Cmd):
             return
         print(f"Variable '{var_name}': Value={var.value}, Type={var.vtype}, Level={var.level}")
 
+    def do_dump_vars(self, arg):
+        "Dump all variables and their values: dump_vars"
+        for var_name, var in self.nicxt.var_store.items():
+            if var.has_value:
+                print(f"{var_name}: Value={var.value}, Type={var.vtype}, Level={var.level}")
+            else:
+                print(f"{var_name}: Value=None, Type={var.vtype}, Level={var.level}")
+
+    def do_del_var(self, arg):
+        "Delete a variable: del_var <var_name>"
+        var_name = arg.strip()
+        if var_name not in self.nicxt.var_store:
+            print(f"Variable '{var_name}' not initialized.")
+            return
+        del self.nicxt.var_store[var_name]
+        print(f"Variable '{var_name}' deleted.")
+
+    def do_del_all_vars(self, arg):
+        "Delete all variables: del_all_vars"
+        self.nicxt.var_store.clear()
+        print("All variables deleted.")
+
+    def do_clear_vars(self, arg):
+        "Clear all variable values without deleting variables: clear_vars"
+        for var in self.nicxt.var_store.values():
+            var.value = None
+            var.has_value = False
+        print("All variable values cleared.")
+
     def do_exit(self, arg):
         "Exit the NI command interface."
         print("Exiting NI command interface.")
