@@ -1,6 +1,7 @@
 from queue import PriorityQueue, Queue
 import cmd
 from langchain_core.runnables.graph_ascii import draw_ascii
+from ipaddress import IPv4Address, IPv6Address
 
 class LatticeElement():
     """
@@ -185,7 +186,24 @@ class Lattice():
         glb_key = self._bfs_common_bound(str(elem1), str(elem2), 'down')
         return self.elements[glb_key] if glb_key else None
     
-class NINode():
+    def less_or_equal(self, elem1: LatticeElement, elem2: LatticeElement) -> bool:
+        """
+        Returns True if elem1 <= elem2 in the lattice, False otherwise.
+        """
+        visited = set()
+        q = Queue()
+        q.put(str(elem1))
+        while not q.empty():
+            current_key = q.get()
+            if current_key == str(elem2):
+                return True
+            visited.add(current_key)
+            for upper_key in self.elements[current_key].upper:
+                if upper_key not in visited:
+                    q.put(upper_key)
+        return False
+    
+class NIHost():
     """
     A node in a non-interference information flow graph. Has the following attributes:
     - name: the name of the node
@@ -193,16 +211,48 @@ class NINode():
     - edges: a set of names of nodes this node has edges to
     """
 
-    def __init__(self, name: str, level: LatticeElement):
+    def __init__(self, name: str, level: LatticeElement, address: IPv4Address | IPv6Address | None = None):
         self.name = name
         self.level = level
         self.edges: set[str] = set()
+        self.address: IPv4Address | IPv6Address | None = address
+        if address is not None:
+            self.address_type = type(address).__name__
+        else:
+            self.address_type = None
 
     def add_edge(self, to_node: str):
         self.edges.add(to_node)
 
+    def del_edge(self, to_node: str):
+        self.edges.remove(to_node)
+
+    def set_address(self, address: IPv4Address | IPv6Address):
+        self.address = address
+        self.address_type = type(address).__name__
+
     def __repr__(self):
-        return f"NINode(name={self.name}, level={self.level}, edges={self.edges})"
+        return f"NIHost(name={self.name}, level={self.level}, edges={self.edges}, address={self.address})"
+    
+class NIVar():
+    """
+    A variable in the non-interference information flow system. Has the following attributes:
+    - name: the name of the variable
+    - level: the security level of the variable (a LatticeElement)
+    - value: the current value of the variable
+    - vtype: the type of the variable ('int' or 'str')
+    - has_value: whether the variable has been assigned a value
+    """
+
+    def __init__(self, name: str, level: LatticeElement, value: int | str | None = None, vtype: str = 'int'):
+        self.name = name
+        self.level = level
+        self.value = value
+        self.vtype = vtype
+        self.has_value = value is not None
+
+    def __repr__(self):
+        return f"NIVar(name={self.name}, level={self.level}, value={self.value})"
     
 class NIContext():
     """
@@ -216,6 +266,8 @@ class NIContext():
         self.c_levels: list[list[str]] = []
         self.i_levels: list[list[str]] = []
         self.lattice: Lattice = Lattice()
+        self.var_store: dict[str, NIVar] = {}
+        self.hosts: dict[str, NIHost] = {}
         if config_file:
             self.build_from_config(config_file)
 
@@ -287,6 +339,75 @@ class NICmd(cmd.Cmd):
             self.nicxt.lattice.view_lattice()
         else:
             print("Invalid argument. Use 'view' or 'dump'.")
+
+    def do_init_var(self, arg):
+        "Initialize a variable with a security level: init_var <var_name> <conf_level> <integ_level>"
+        parts = arg.strip().split()
+        if len(parts) != 3:
+            print("Usage: init_var <var_name> <conf_level> <integ_level>")
+            return
+        var_name, conf_level, integ_level = parts
+        level_key = f"{conf_level},{integ_level}"
+        if level_key not in self.nicxt.lattice.elements:
+            print(f"Security level {level_key} not found in lattice.")
+            return
+        self.nicxt.var_store[var_name] = NIVar(name=var_name, level=self.nicxt.lattice.elements[level_key])
+        print(f"Variable '{var_name}' initialized with level {level_key}.")
+
+    def do_set_var(self, arg):
+        "Set a variable's value (default int): set_var <var_name> <value|var_name> <type=str|int>"
+        parts = arg.strip().split()
+        val = None
+        vtype = 'int'
+        if len(parts) > 3 or len(parts) < 2:
+            print("Usage: set_var <var_name> <value|var_name> <type=str|int>")
+            return
+        elif len(parts) == 2:
+            var_name, val = parts
+        else:
+            var_name, val, vtype = parts
+        
+        if var_name not in self.nicxt.var_store:
+            print(f"Variable '{var_name}' not initialized. Initializing with default level L,L.")
+            default_level = self.nicxt.lattice.elements.get("L,L")
+            if default_level is None:
+                print("Default security level L,L not found in lattice.")
+                return
+            self.nicxt.var_store[var_name] = NIVar(name=var_name, level=default_level, value=None, vtype=vtype)
+        
+        if val in self.nicxt.var_store:
+            src_level = self.nicxt.var_store[val].level
+            dest_level = self.nicxt.var_store[var_name].level
+            if not self.nicxt.lattice.less_or_equal(src_level, dest_level):
+                print(f"Security violation: cannot flow from {src_level} to {dest_level}.")
+                return
+            val = self.nicxt.var_store[val].value
+        
+        self.nicxt.var_store[var_name].value = val
+        self.nicxt.var_store[var_name].has_value = True
+        if vtype == 'int' and val is not None:
+            try:
+                val = int(val)
+            except ValueError:
+                print("Non-integer value, assuming string type.")
+                vtype = 'str'
+        
+        if vtype != self.nicxt.var_store[var_name].vtype:
+            print(f"Changing variable '{var_name}' type from {self.nicxt.var_store[var_name].vtype} to {vtype}.")
+            self.nicxt.var_store[var_name].vtype = vtype
+        print(f"Variable '{var_name}' set to {val} ({vtype}).")
+
+    def do_print_var(self, arg):
+        "Print a variable's value: print_var <var_name>"
+        var_name = arg.strip()
+        if var_name not in self.nicxt.var_store:
+            print(f"Variable '{var_name}' not initialized.")
+            return
+        var = self.nicxt.var_store[var_name]
+        if not var.has_value:
+            print(f"Variable '{var_name}' has no value assigned.")
+            return
+        print(f"Variable '{var_name}': Value={var.value}, Type={var.vtype}, Level={var.level}")
 
     def do_exit(self, arg):
         "Exit the NI command interface."
