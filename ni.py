@@ -169,3 +169,41 @@ class Lattice():
         """
         glb_key = self._bfs_common_bound(str(elem1), str(elem2), 'down')
         return self.elements[glb_key] if glb_key else None
+    
+class NIContext():
+    """
+    A context built from a given configuration file. Holds the following:
+    - c_levels: confidentiality levels used in this context
+    - i_levels: integrity levels used in this context
+    - lattice: the security lattice used in this context
+    """
+
+    def __init__(self, config_file: str):
+        self.c_levels: list[list[str]] = []
+        self.i_levels: list[list[str]] = []
+        self.lattice: Lattice
+
+        with open(config_file, 'r') as f:
+            lines = f.readlines()
+        
+        mode = None
+        for line in lines:
+            line = line.strip()
+            if line == '':
+                continue
+            if line.startswith('#'):
+                continue
+            if line == '[Confidentiality Levels]':
+                mode = 'c'
+                continue
+            elif line == '[Integrity Levels]':
+                mode = 'i'
+                continue
+            if mode == 'c':
+                levels = [lvl.strip() for lvl in line.split(',')]
+                self.c_levels.append(levels)
+            elif mode == 'i':
+                levels = [lvl.strip() for lvl in line.split(',')]
+                self.i_levels.append(levels)
+        
+        self.lattice = Lattice(self.c_levels, self.i_levels)
