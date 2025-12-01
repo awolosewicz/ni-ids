@@ -208,6 +208,24 @@ class Lattice():
                     q.put(upper_key)
         return False
     
+    def minimum_element(self) -> LatticeElement | None:
+        """
+        Returns the minimum element in the lattice, if it exists.
+        """
+        for element in self.elements.values():
+            if not element.lower:
+                return element
+        return None
+    
+    def maximum_element(self) -> LatticeElement | None:
+        """
+        Returns the maximum element in the lattice, if it exists.
+        """
+        for element in self.elements.values():
+            if not element.upper:
+                return element
+        return None
+    
 class NIHost():
     """
     A node in a non-interference information flow graph. Has the following attributes:
@@ -259,6 +277,13 @@ class NIVar():
     def __repr__(self):
         return f"NIVar(name={self.name}, level={self.level}, value={self.value})"
     
+class NIException(Exception):
+    """
+    Custom exception class for NI-related errors.
+    """
+    def __init__(self, message: str):
+        super().__init__(message)
+    
 class NIContext():
     """
     A context built from a given configuration file. Holds the following:
@@ -275,6 +300,8 @@ class NIContext():
         self.hosts: dict[str, NIHost] = {}
         if config_file:
             self.build_from_config(config_file)
+        self.pc_level = self.lattice.minimum_element()
+        self.auth_level = self.lattice.minimum_element()
 
     def build_from_config(self, config_file: str):
         self.c_levels: list[list[str]] = []
@@ -329,6 +356,25 @@ class NIContext():
                     self.hosts[name] = host
         self.lattice = Lattice(self.c_levels, self.i_levels)
 
+    def set_auth_level(self, level: LatticeElement):
+        """
+        Set the current authentication level.
+        """
+        self.auth_level = level
+
+    def pcdecl(self, level_from: LatticeElement, level_to: LatticeElement, verbose: bool = False):
+        """
+        Change the PC level, from "Reconciling Progress-Insensitive Noninterference and Declassification"
+        by Johan Bay and Aslan Askarov, 2020.
+        """
+        if verbose:
+            print(f"Join: {self.lattice.join(self.auth_level, level_to)}")
+            print(f"Less or equal: {self.lattice.less_or_equal(level_from, self.lattice.join(self.auth_level, level_to))}")
+        if not self.lattice.less_or_equal(level_from, self.lattice.join(self.auth_level, level_to)):
+            raise NIException("Invalid PC downgrade, cannot downgrade to a lower level " \
+                              "without proper authority.") 
+        self.pc_level = level_to
+
 class NICmd(cmd.Cmd):
     """
     Command-line interface for interacting with the NIContext.
@@ -344,6 +390,7 @@ class NICmd(cmd.Cmd):
             raise ValueError(f"Host '{host}' not found in context.")
         self.host = self.nicxt.hosts[host]
         self.prompt = f"{self.host.name}> "
+        self.nicxt.set_auth_level(self.host.level)
         print(f"Using host: {self.host.name} with address {self.host.address}")
 
     def do_load_config(self, arg):
@@ -367,6 +414,14 @@ class NICmd(cmd.Cmd):
             self.nicxt.lattice.view_lattice()
         else:
             print("Invalid argument. Use 'view' or 'dump'.")
+
+    def do_status(self, arg):
+        "Show the current host status: status"
+        print(f"Host: {self.host.name}")
+        print(f"Address: {self.host.address}")
+        print(f"Level: {self.host.level}")
+        print(f"PC Level: {self.nicxt.pc_level}")
+        print(f"Auth Level: {self.nicxt.auth_level}")
 
     def do_init_var(self, arg):
         "Initialize a variable with a security level: init_var <var_name> <conf_level> <integ_level>"
@@ -487,10 +542,8 @@ class NICmd(cmd.Cmd):
         
         pkt = IP(dst=str(dest_host.address))/NIHeader(level=self.nicxt.lattice.element_ids[level],
                                                       enc=encrypted, sig=signature)/Raw(load=data.encode())
-        pkt.show()
         send(pkt)
         print(f"Packet sent from {self.host.name} to {dest_host.name}.")
-
 
     def do_exit(self, arg):
         "Exit the NI command interface."
@@ -500,3 +553,9 @@ class NICmd(cmd.Cmd):
     def do_quit(self, arg):
         "Exit the NI command interface."
         return self.do_exit(arg)
+    
+    #TODO: Remove test command
+    def do_test(self, arg):
+        args = arg.split()
+        self.nicxt.pcdecl(level_from=self.nicxt.lattice.elements[args[0]],
+                          level_to=self.nicxt.lattice.elements[args[1]], verbose=True)
