@@ -6,7 +6,6 @@ from scapy.layers.inet import IP
 from scapy.packet import Raw
 from scapy.sendrecv import send, sr1
 from ni_header import NIHeader
-import ni_header
 
 class LatticeElement():
     """
@@ -488,6 +487,7 @@ class NICmd(cmd.Cmd):
         
         pkt = IP(dst=str(dest_host.address))/NIHeader(level=self.nicxt.lattice.element_ids[level],
                                                       enc=encrypted, sig=signature)/Raw(load=data.encode())
+        pkt.show()
         send(pkt)
         print(f"Packet sent from {self.host.name} to {dest_host.name}.")
 
