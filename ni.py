@@ -122,6 +122,15 @@ class Lattice():
                 edges.append((str(element), upper_key))
         print(draw_ascii(vertices, edges))
 
+    def assert_element(self, key: str) -> bool:
+        if key in self.elements:
+            return True
+        raise KeyError(f"Lattice element {key} not found.")
+
+    def get_element(self, key: str) -> LatticeElement:
+        self.assert_element(key)
+        return self.elements[key]
+
     def add_element(self, element: LatticeElement):
         key = f"{element.c},{element.i}"
         self.elements[key] = element
@@ -142,6 +151,11 @@ class Lattice():
                         self.elements[lower_key].del_upper(upper_key)
 
     def _bfs_common_bound(self, start1: str, start2: str, direction: str) -> str | None:
+        """
+        Searches for the closest common bound between two elements using BFS.
+        For each element, explores in the specified direction and records distance of each element.
+        Chooses the element with the smallest combined distance.
+        """
         cbound = None
         visited = set()
         dists: dict[str, int] = {}
@@ -282,7 +296,7 @@ class NIException(Exception):
     Custom exception class for NI-related errors.
     """
     def __init__(self, message: str):
-        super().__init__(message)
+        super().__init__(f"Security Exception: {message}")
     
 class NIContext():
     """
@@ -300,6 +314,7 @@ class NIContext():
         self.hosts: dict[str, NIHost] = {}
         if config_file:
             self.build_from_config(config_file)
+        self.var_store_max_lvl = self.lattice.minimum_element()
         self.pc_level = self.lattice.minimum_element()
         self.auth_level = self.lattice.minimum_element()
 
@@ -356,11 +371,30 @@ class NIContext():
                     self.hosts[name] = host
         self.lattice = Lattice(self.c_levels, self.i_levels)
 
+    def increase_pc_level(self, level: LatticeElement):
+        """
+        Increase the current PC level to the join of the current PC level and the given level.
+        """
+        new_pc_level = self.lattice.join(self.pc_level, level)
+        if new_pc_level is not None:
+            if new_pc_level != self.pc_level:
+                self.set_pc_level(new_pc_level)
+        else:
+            raise NIException("Failed to increase PC level; no common upper bound found.")
+
+    def set_pc_level(self, level: LatticeElement):
+        """
+        Set the current PC level.
+        """
+        self.pc_level = level
+        print(f"PC level set to {level}.")
+
     def set_auth_level(self, level: LatticeElement):
         """
         Set the current authentication level.
         """
         self.auth_level = level
+        print(f"Auth level set to {level}.")
 
     def pcdecl(self, level_from: LatticeElement, level_to: LatticeElement, verbose: bool = False):
         """
@@ -373,7 +407,14 @@ class NIContext():
         if not self.lattice.less_or_equal(level_from, self.lattice.join(self.auth_level, level_to)):
             raise NIException("Invalid PC downgrade, cannot downgrade to a lower level " \
                               "without proper authority.") 
-        self.pc_level = level_to
+        self.set_pc_level(level_to)
+
+    def assert_level_pc(self, level: LatticeElement):
+        """
+        Assert that the PC level is less than or equal to the given level.
+        """
+        if not self.lattice.less_or_equal(self.pc_level, level):
+            raise NIException("PC level not less or equal to the given level.")
 
 class NICmd(cmd.Cmd):
     """
@@ -431,11 +472,21 @@ class NICmd(cmd.Cmd):
             return
         var_name, conf_level, integ_level = parts
         level_key = f"{conf_level},{integ_level}"
-        if level_key not in self.nicxt.lattice.elements:
-            print(f"Security level {level_key} not found in lattice.")
+        try:
+            level = self.nicxt.lattice.get_element(level_key)
+            self.nicxt.assert_level_pc(level)
+            self.nicxt.var_store[var_name] = NIVar(name=var_name, level=level)
+            self.nicxt.var_store_max_lvl = self.nicxt.lattice.join(self.nicxt.var_store_max_lvl, level)
+            print(f"Variable '{var_name}' initialized with level {level_key}.")
+        except KeyError as ke:
+            print(ke)
             return
-        self.nicxt.var_store[var_name] = NIVar(name=var_name, level=self.nicxt.lattice.elements[level_key])
-        print(f"Variable '{var_name}' initialized with level {level_key}.")
+        except NIException as nie:
+            print(nie)
+            return
+        except Exception as e:
+            print(f"Error initializing variable: {e}")
+            return
 
     def do_set_var(self, arg):
         "Set a variable's value (default int): set_var <var_name> <value|var_name> <type=str|int>"
@@ -452,22 +503,37 @@ class NICmd(cmd.Cmd):
         
         if var_name not in self.nicxt.var_store:
             print(f"Variable '{var_name}' not initialized. Initializing with default level L,L.")
-            default_level = self.nicxt.lattice.elements.get("L,L")
-            if default_level is None:
-                print("Default security level L,L not found in lattice.")
+            self.do_init_var(f"{var_name} L L")
+            if var_name not in self.nicxt.var_store:
                 return
-            self.nicxt.var_store[var_name] = NIVar(name=var_name, level=default_level, value=None, vtype=vtype)
         
+        src_level = self.nicxt.lattice.minimum_element()
+        dest_level = self.nicxt.var_store[var_name].level
         if val in self.nicxt.var_store:
-            src_level = self.nicxt.var_store[val].level
-            dest_level = self.nicxt.var_store[var_name].level
-            if not self.nicxt.lattice.less_or_equal(src_level, dest_level):
-                print(f"Security violation: cannot flow from {src_level} to {dest_level}.")
+            if not self.nicxt.var_store[val].has_value:
+                print(f"Variable '{val}' has no value assigned.")
                 return
+            src_level = self.nicxt.var_store[val].level
             val = self.nicxt.var_store[val].value
+
+        try:
+            sec_level = self.nicxt.lattice.join(self.nicxt.pc_level, src_level)
+            # Dynamic assignment check from Bay and Askarov 2020
+            if not self.nicxt.lattice.less_or_equal(sec_level, dest_level):
+                raise NIException(f"Level of value ({src_level}) join pc ({self.nicxt.pc_level}) ({sec_level}) "
+                                  f"must be <= destination ({dest_level}).")
+            self.nicxt.var_store[var_name].value = val
+            self.nicxt.var_store[var_name].has_value = True
+        except KeyError as ke:
+            print(ke)
+            return
+        except NIException as nie:
+            print(nie)
+            return
+        except Exception as e:
+            print(f"Error setting variable: {e}")
+            return
         
-        self.nicxt.var_store[var_name].value = val
-        self.nicxt.var_store[var_name].has_value = True
         if vtype == 'int' and val is not None:
             try:
                 val = int(val)
@@ -487,6 +553,7 @@ class NICmd(cmd.Cmd):
             print(f"Variable '{var_name}' not initialized.")
             return
         var = self.nicxt.var_store[var_name]
+        self.nicxt.increase_pc_level(var.level)
         if not var.has_value:
             print(f"Variable '{var_name}' has no value assigned.")
             return
@@ -494,6 +561,7 @@ class NICmd(cmd.Cmd):
 
     def do_dump_vars(self, arg):
         "Dump all variables and their values: dump_vars"
+        self.nicxt.increase_pc_level(self.nicxt.var_store_max_lvl)
         for var_name, var in self.nicxt.var_store.items():
             if var.has_value:
                 print(f"{var_name}: Value={var.value}, Type={var.vtype}, Level={var.level}")
@@ -520,6 +588,13 @@ class NICmd(cmd.Cmd):
             var.value = None
             var.has_value = False
         print("All variable values cleared.")
+
+    def do_reset_env(self, arg):
+        "Reset the environment, clearing variables and minimizing PC: reset_env"
+        self.nicxt.var_store.clear()
+        self.nicxt.var_store_max_lvl = self.nicxt.lattice.minimum_element()
+        self.nicxt.set_pc_level(self.nicxt.lattice.minimum_element())
+        print("Environment reset.")
 
     def do_send_packet(self, arg):
         "Send a packet from the current host: send_packet <dest_host> <confidentiality> <integrity> <encrypted> <data>"
