@@ -1,11 +1,15 @@
 from queue import PriorityQueue, Queue
+from threading import Thread
 import cmd
 from dagascii.dagascii import draw as draw_ascii
 from ipaddress import IPv4Address, IPv6Address
 from scapy.layers.inet import IP
-from scapy.packet import Raw
-from scapy.sendrecv import send, sr1
+from scapy.layers.inet6 import IPv6
+from scapy.packet import Raw, Packet
+from scapy.sendrecv import send, sniff
 from ni_header import NIHeader
+import json
+import logging
 
 class LatticeElement():
     """
@@ -433,7 +437,112 @@ class NICmd(cmd.Cmd):
         self.prompt = f"{self.host.name}> "
         self.nicxt.set_auth_level(self.host.level)
         print(f"Using host: {self.host.name} with address {self.host.address}")
+        self.shared_queue = Queue()
+        self.packet_listener = Thread(target=sniff, kwargs={
+            'filter': f"ip dst {self.host.address} and ip proto 254",
+            'prn': lambda pkt: self.process_packet(pkt, self.shared_queue)
+        })
+        self.packet_listener.daemon = True
+        self.packet_listener.start()
+        logging.info(f"NICmd initialized for host {self.host.name} with address {self.host.address}.")
 
+    def process_packet(self, packet: Packet, queue: Queue):
+        """
+        Listens for incoming NI packets and processes them.
+        """
+        if not NIHeader in packet:
+            return
+        ni_header = packet[NIHeader]
+        src = None
+        if IP in packet:
+            src = IPv4Address(packet[IP].src)
+        elif IPv6 in packet:
+            src = IPv6Address(packet[IPv6].src)
+        logging.info(f"Received packet from {packet[IP].src} to {packet[IP].dst} with level {level_key}")
+        level_id = ni_header.level
+        pkt_type = ni_header.pkt_type
+        session = ni_header.session
+        if pkt_type == "ACK" or pkt_type == "RESPONSE":
+            queue.put(packet)
+            return
+        elif pkt_type not in ["READ", "WRITE"]:
+            return
+        level_key = self.nicxt.lattice.ids_element.get(level_id, None)
+        if level_key is None:
+            print(f"Received packet with unknown level ID: {level_id}")
+            return
+        level = self.nicxt.lattice.get_element(level_key)
+        data = json.loads(packet[Raw].load.decode())
+
+        if pkt_type == "READ":
+            # For reading, the sender is requesting with their auth as level
+            var_name = data.get("var_name", "")
+            if var_name not in self.nicxt.var_store:
+                logging.warning(f"Variable '{var_name}' not found for READ request from {src}.")
+                self.send_packet(src, level=level, encrypted=ni_header.enc,
+                                 pkt_type="RESPONSE", session=session,
+                                 data={"error": "Variable not found"})
+                return
+            var = self.nicxt.var_store[var_name]
+            if not self.nicxt.lattice.less_or_equal(var.level, level):
+                logging.warning(f"Unauthorized READ request for variable '{var_name}' from {src}.")
+                self.send_packet(src, level=level, encrypted=ni_header.enc,
+                                 pkt_type="RESPONSE", session=session,
+                                 data={"error": "Unauthorized access"})
+                return
+            logging.info(f"Processing READ request for variable '{var_name}' from {src}.")
+            self.send_packet(src, level=level, encrypted=ni_header.enc,
+                             pkt_type="RESPONSE", session=session,
+                             data={"var_name": var_name, "value": var.value, "vtype": var.vtype})
+            return
+        elif pkt_type == "WRITE":
+            # For writing, the sender is providing data with the val level as level
+            var_name = data.get("var_name", "")
+            value = data.get("value", None)
+            vtype = data.get("vtype", "int")
+            if var_name not in self.nicxt.var_store:
+                logging.warning(f"Variable '{var_name}' not found for WRITE request from {src}.")
+                if not self.init_var(var_name, level.c, level.i):
+                    self.send_packet(src, level=level, encrypted=ni_header.enc,
+                                     pkt_type="RESPONSE", session=session,
+                                     data={"error": "Variable not found and initialization failed"})
+                    return
+            var = self.nicxt.var_store[var_name]
+            if not self.nicxt.lattice.less_or_equal(level, var.level):
+                logging.warning(f"Unauthorized WRITE request for variable '{var_name}' from {src}.")
+                self.send_packet(src, level=level, encrypted=ni_header.enc,
+                                 pkt_type="RESPONSE", session=session,
+                                 data={"error": "Unauthorized access"})
+                return
+            var.value = value
+            var.vtype = vtype
+            var.has_value = True
+            logging.info(f"Processed WRITE request for variable '{var_name}' from {src}.")
+            self.send_packet(src, level=level, encrypted=ni_header.enc,
+                             pkt_type="RESPONSE", session=session,
+                             data={"status": "Success"})
+            return
+
+    def send_packet(self, dest: IPv4Address | IPv6Address, level: LatticeElement,
+                    encrypted: int, pkt_type: str, session: int, data) -> None:
+        """
+        Send a packet from the current host to the destination host with the given security level.
+        """
+        signature = 0  # TODO: signature generation
+        pkt = None
+        #TODO: Ensure that type works with string args for the enum
+        rawdata = json.dumps(data)
+        if type(dest) == IPv4Address:
+            pkt = IP(dst=str(dest))/NIHeader(level=self.nicxt.lattice.element_ids[str(level)],
+                                             enc=encrypted, pkt_type=pkt_type, session=session,
+                                             sig=signature)/Raw(load=rawdata.encode())
+        elif type(dest) == IPv6Address:
+            pkt = IPv6(dst=str(dest))/NIHeader(level=self.nicxt.lattice.element_ids[str(level)],
+                                             enc=encrypted, pkt_type=pkt_type, session=session,
+                                             sig=signature)/Raw(load=rawdata.encode())
+        send(pkt)
+        print(f"Packet sent from {self.host.name} to {dest}.")
+    
     def do_load_config(self, arg):
         "Load a configuration file: load_config <filename>"
         filename = arg.strip()
@@ -464,6 +573,26 @@ class NICmd(cmd.Cmd):
         print(f"PC Level: {self.nicxt.pc_level}")
         print(f"Auth Level: {self.nicxt.auth_level}")
 
+    def init_var(self, var_name: str, conf_level: str, integ_level: str):
+        """
+        Initialize a variable with the given security level.
+        """
+        level_key = f"{conf_level},{integ_level}"
+        try:
+            level = self.nicxt.lattice.get_element(level_key)
+            self.nicxt.assert_level_pc(level)
+            self.nicxt.var_store[var_name] = NIVar(name=var_name, level=level)
+            self.nicxt.var_store_max_lvl = self.nicxt.lattice.join(self.nicxt.var_store_max_lvl, level)
+        except KeyError as ke:
+            print(ke)
+            return False
+        except NIException as nie:
+            print(nie)
+            return False
+        except Exception as e:
+            print(f"Error initializing variable: {e}")
+            return False
+
     def do_init_var(self, arg):
         "Initialize a variable with a security level: init_var <var_name> <conf_level> <integ_level>"
         parts = arg.strip().split()
@@ -471,22 +600,9 @@ class NICmd(cmd.Cmd):
             print("Usage: init_var <var_name> <conf_level> <integ_level>")
             return
         var_name, conf_level, integ_level = parts
-        level_key = f"{conf_level},{integ_level}"
-        try:
-            level = self.nicxt.lattice.get_element(level_key)
-            self.nicxt.assert_level_pc(level)
-            self.nicxt.var_store[var_name] = NIVar(name=var_name, level=level)
-            self.nicxt.var_store_max_lvl = self.nicxt.lattice.join(self.nicxt.var_store_max_lvl, level)
-            print(f"Variable '{var_name}' initialized with level {level_key}.")
-        except KeyError as ke:
-            print(ke)
+        if not self.init_var(var_name, conf_level, integ_level):
             return
-        except NIException as nie:
-            print(nie)
-            return
-        except Exception as e:
-            print(f"Error initializing variable: {e}")
-            return
+        print(f"Variable '{var_name}' initialized with level {conf_level},{integ_level}.")
 
     def do_set_var(self, arg):
         "Set a variable's value (default int): set_var <var_name> <value|var_name> <type=str|int>"
@@ -613,12 +729,7 @@ class NICmd(cmd.Cmd):
         if level not in self.nicxt.lattice.elements:
             print(f"Security level {level} not found in lattice.")
             return
-        signature = 0  # TODO: signature generation
-        
-        pkt = IP(dst=str(dest_host.address))/NIHeader(level=self.nicxt.lattice.element_ids[level],
-                                                      enc=encrypted, sig=signature)/Raw(load=data.encode())
-        send(pkt)
-        print(f"Packet sent from {self.host.name} to {dest_host.name}.")
+        self.send_packet(dest_host.address, self.nicxt.lattice.elements[level], encrypted, data)
 
     def do_exit(self, arg):
         "Exit the NI command interface."
