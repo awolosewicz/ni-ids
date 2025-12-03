@@ -582,11 +582,11 @@ class NICmd(cmd.Cmd):
                 print(warn_str)
                 return
         if type(dest) == IPv4Address:
-            pkt = IP(dst=str(dest))/NIHeader(level=self.nicxt.lattice.element_ids[str(level)],
+            pkt = IP(src=str(self.host.address), dst=str(dest))/NIHeader(level=self.nicxt.lattice.element_ids[str(level)],
                                              enc=encrypted, pkt_type=pkt_type, session=session,
                                              sig=signature)/Raw(load=rawdata.encode())
         elif type(dest) == IPv6Address:
-            pkt = IPv6(dst=str(dest))/NIHeader(level=self.nicxt.lattice.element_ids[str(level)],
+            pkt = IPv6(src=str(self.host.address), dst=str(dest))/NIHeader(level=self.nicxt.lattice.element_ids[str(level)],
                                              enc=encrypted, pkt_type=pkt_type, session=session,
                                              sig=signature)/Raw(load=rawdata.encode())
         send(pkt)
