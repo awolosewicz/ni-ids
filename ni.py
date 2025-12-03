@@ -499,7 +499,6 @@ class NICmd(cmd.Cmd):
             src = IPv4Address(packet[IP].src)
         elif IPv6 in packet:
             src = IPv6Address(packet[IPv6].src)
-        logging.info(f"Received packet from {packet[IP].src} to {packet[IP].dst} with level {level_key}")
         src_host = self.nicxt.ips_to_hosts.get(str(src), None)
         if src_host is None:
             logging.warning(f"Received packet from unknown source address: {src}. Reduced level to L,L.")
@@ -517,6 +516,7 @@ class NICmd(cmd.Cmd):
             print(f"Received packet with unknown level ID: {level_id}")
             return
         level = self.nicxt.lattice.get_element(level_key)
+        logging.info(f"Received packet from {packet[IP].src} to {packet[IP].dst} with level {level_key}")
         data = json.loads(packet[Raw].load.decode())
 
         if pkt_type == "READ":
