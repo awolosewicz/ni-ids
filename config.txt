@@ -9,5 +9,11 @@ H
 H
 L
 [Resources]
-h1,h,L,L,10.0.1.11
-h2,h,H,H,10.0.1.12
+pb,h,L,L,10.0.1.11
+n1,h,H,H,10.0.2.11
+n2,h,H,H,10.0.2.12
+admin,u,H,H
+alice,u,A,H
+bob,u,B,H
+charlie,u,C,H
+eve,u,L,L
