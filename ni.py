@@ -492,6 +492,7 @@ class NICmd(cmd.Cmd):
         """
         logging.info("Received packet")
         if not NIHeader in packet:
+            logging.warning("Received packet without NIHeader, ignoring.")
             return
         ni_header = packet[NIHeader]
         src = None
@@ -508,12 +509,14 @@ class NICmd(cmd.Cmd):
         session = ni_header.session
         if pkt_type == "ACK" or pkt_type == "RESPONSE":
             queue.put(packet)
+            logging.info(f"Enqueued packet of type {pkt_type} for session {session}.")
             return
         elif pkt_type not in ["READ", "WRITE"]:
+            logging.warning(f"Received packet with unknown type: {pkt_type}, ignoring.")
             return
         level_key = self.nicxt.lattice.ids_element.get(level_id, None)
         if level_key is None:
-            print(f"Received packet with unknown level ID: {level_id}")
+            logging.warning(f"Received packet with unknown level ID: {level_id}")
             return
         level = self.nicxt.lattice.get_element(level_key)
         logging.info(f"Received packet from {packet[IP].src} to {packet[IP].dst} with level {level_key}")
