@@ -340,7 +340,8 @@ class NIContext():
     def build_from_config(self, config_file: str):
         self.c_levels: list[list[str]] = []
         self.i_levels: list[list[str]] = []
-        self.lattice: Lattice
+        self.lattice: Lattice = Lattice()
+        lattice_built = False
 
         with open(config_file, 'r') as f:
             lines = f.readlines()
@@ -368,6 +369,9 @@ class NIContext():
                 levels = [lvl.strip() for lvl in line.split(',')]
                 self.i_levels.append(levels)
             elif mode == 'r':
+                if not lattice_built:
+                    lattice_built = True
+                    self.lattice = Lattice(self.c_levels, self.i_levels)
                 parts = [part.strip() for part in line.split(',')]
                 name = parts[0]
                 rtype = parts[1]
@@ -393,11 +397,11 @@ class NIContext():
                     i_level = parts[3]
                     level_key = f"{c_level},{i_level}"
                     if level_key not in self.lattice.elements:
+                        print(self.lattice.elements)
                         raise ValueError(f"Security level {level_key} not found in lattice.")
                     level = self.lattice.elements[level_key]
                     user = NIUser(name=name, level=level)
                     self.users[name] = user
-        self.lattice = Lattice(self.c_levels, self.i_levels)
 
     def increase_pc_level(self, level: LatticeElement):
         """
