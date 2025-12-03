@@ -462,8 +462,10 @@ class NICmd(cmd.Cmd):
         if host not in self.nicxt.hosts:
             raise ValueError(f"Host '{host}' not found in context.")
         self.host = self.nicxt.hosts[host]
+        self.user: NIUser | None = None
         self.prompt = f"{self.host.name}> "
         self.nicxt.set_auth_level(self.host.level)
+        self.session_counter = 1
         print(f"Using host: {self.host.name} with address {self.host.address}")
         self.shared_queue = Queue()
         self.packet_listener = Thread(target=sniff, kwargs={
@@ -577,9 +579,10 @@ class NICmd(cmd.Cmd):
         if username not in self.nicxt.users:
             print(f"User '{username}' not found.")
             return
-        user = self.nicxt.users[username]
+        self.user = self.nicxt.users[username]
         self.do_reset_env('')
-        self.nicxt.set_auth_level(user.level)
+        self.nicxt.set_auth_level(self.user.level)
+        self.prompt = f"{self.user.name}> "
     
     def do_load_config(self, arg):
         "Load a configuration file: load_config <filename>"
