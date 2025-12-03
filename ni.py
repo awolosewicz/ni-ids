@@ -489,6 +489,7 @@ class NICmd(cmd.Cmd):
         """
         Listens for incoming NI packets and processes them.
         """
+        logging.info("Received packet")
         if not NIHeader in packet:
             return
         ni_header = packet[NIHeader]
