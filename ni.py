@@ -332,6 +332,7 @@ class NIContext():
         self.hosts: dict[str, NIHost] = {}
         self.ips_to_hosts: dict[str, NIHost] = {}
         self.users: dict[str, NIUser] = {}
+        self.node_conns: dict[str, dict[str, str]] = {}
         if config_file:
             self.build_from_config(config_file)
         self.var_store_max_lvl = self.lattice.minimum_element()
@@ -394,6 +395,12 @@ class NIContext():
                     host = NIHost(name=name, level=level, address=address)
                     self.hosts[name] = host
                     self.ips_to_hosts[str(address)] = host
+                elif rtype == 'c':
+                    node_1 = parts[2]
+                    node_2 = parts[3]
+                    level_key = f"{parts[4]},{parts[5]}"
+                    self.node_conns.setdefault(node_1, {})[node_2] = level_key
+                    self.node_conns.setdefault(node_2, {})[node_1] = level_key
                 elif rtype == 'u':
                     c_level = parts[2]
                     i_level = parts[3]
@@ -565,12 +572,14 @@ class NICmd(cmd.Cmd):
         #TODO: Ensure that type works with string args for the enum
         rawdata = json.dumps(data)
         dest_host = self.nicxt.ips_to_hosts.get(str(dest), None)
-        if dest_host is None:
+        route_level_key = self.nicxt.node_conns.get(self.host.name, {}).get(dest_host.name, None)
+        route_level = self.nicxt.lattice.get_element(route_level_key) if route_level_key else None
+        if dest_host is None or route_level is None:
             logging.error(f"Destination host with address {dest} not found.")
             return
         if not self.nicxt.lattice.less_or_equal(level, dest_host.level):
             logging.warning(f"Packet to {dest} with level {level} exceeds destination host level {dest_host.level}. Lowering level.")
-            level = dest_host.level
+            level = route_level
         if encrypted == 0:
             logging.warning("Sending unencrypted packet. Integrity level floored to L.")
             level = self.nicxt.lattice.get_element(f"{level.c},L")
