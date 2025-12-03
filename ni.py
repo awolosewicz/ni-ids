@@ -275,6 +275,20 @@ class NIHost():
     def __repr__(self):
         return f"NIHost(name={self.name}, level={self.level}, edges={self.edges}, address={self.address})"
     
+class NIUser():
+    """
+    A user in the non-interference information flow system. Has the following attributes:
+    - name: the name of the user
+    - level: the security level of the user (a LatticeElement)
+    """
+
+    def __init__(self, name: str, level: LatticeElement):
+        self.name = name
+        self.level = level
+
+    def __repr__(self):
+        return f"NIUser(name={self.name}, level={self.level})"
+    
 class NIVar():
     """
     A variable in the non-interference information flow system. Has the following attributes:
@@ -316,6 +330,7 @@ class NIContext():
         self.lattice: Lattice = Lattice()
         self.var_store: dict[str, NIVar] = {}
         self.hosts: dict[str, NIHost] = {}
+        self.users: dict[str, NIUser] = {}
         if config_file:
             self.build_from_config(config_file)
         self.var_store_max_lvl = self.lattice.minimum_element()
@@ -373,6 +388,15 @@ class NIContext():
                         raise ValueError(f"Invalid IP address: {address_str}")
                     host = NIHost(name=name, level=level, address=address)
                     self.hosts[name] = host
+                elif rtype == 'u':
+                    c_level = parts[2]
+                    i_level = parts[3]
+                    level_key = f"{c_level},{i_level}"
+                    if level_key not in self.lattice.elements:
+                        raise ValueError(f"Security level {level_key} not found in lattice.")
+                    level = self.lattice.elements[level_key]
+                    user = NIUser(name=name, level=level)
+                    self.users[name] = user
         self.lattice = Lattice(self.c_levels, self.i_levels)
 
     def increase_pc_level(self, level: LatticeElement):
@@ -542,6 +566,16 @@ class NICmd(cmd.Cmd):
                                              sig=signature)/Raw(load=rawdata.encode())
         send(pkt)
         print(f"Packet sent from {self.host.name} to {dest}.")
+
+    def do_login(self, arg):
+        "Login to a given user, resetting environment: login <username>"
+        username = arg.strip()
+        if username not in self.nicxt.users:
+            print(f"User '{username}' not found.")
+            return
+        user = self.nicxt.users[username]
+        self.do_reset_env('')
+        self.nicxt.set_auth_level(user.level)
     
     def do_load_config(self, arg):
         "Load a configuration file: load_config <filename>"
