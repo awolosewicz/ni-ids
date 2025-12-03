@@ -330,6 +330,7 @@ class NIContext():
         self.lattice: Lattice = Lattice()
         self.var_store: dict[str, NIVar] = {}
         self.hosts: dict[str, NIHost] = {}
+        self.ips_to_hosts: dict[str, NIHost] = {}
         self.users: dict[str, NIUser] = {}
         if config_file:
             self.build_from_config(config_file)
@@ -392,6 +393,7 @@ class NIContext():
                         raise ValueError(f"Invalid IP address: {address_str}")
                     host = NIHost(name=name, level=level, address=address)
                     self.hosts[name] = host
+                    self.ips_to_hosts[str(address)] = host
                 elif rtype == 'u':
                     c_level = parts[2]
                     i_level = parts[3]
@@ -562,6 +564,16 @@ class NICmd(cmd.Cmd):
         pkt = None
         #TODO: Ensure that type works with string args for the enum
         rawdata = json.dumps(data)
+        dest_host = self.nicxt.ips_to_hosts.get(str(dest), None)
+        if dest_host is None:
+            logging.error(f"Destination host with address {dest} not found.")
+            return
+        if not self.nicxt.lattice.less_or_equal(level, dest_host.level):
+            logging.warning(f"Packet to {dest} with level {level} exceeds destination host level {dest_host.level}. Lowering level.")
+            level = dest_host.level
+        if encrypted == 0:
+            logging.warning("Sending unencrypted packet. Integrity level floored to L.")
+            level = self.nicxt.lattice.get_element(f"{level.c},L")
         if type(dest) == IPv4Address:
             pkt = IP(dst=str(dest))/NIHeader(level=self.nicxt.lattice.element_ids[str(level)],
                                              enc=encrypted, pkt_type=pkt_type, session=session,
