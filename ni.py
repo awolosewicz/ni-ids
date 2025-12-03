@@ -465,7 +465,7 @@ class NICmd(cmd.Cmd):
     intro = "Non-Interference Information Flow Control System. Type 'help' for commands."
     prompt = "ni> "
 
-    def __init__(self, host: str, config_file: str = ''):
+    def __init__(self, host: str, iface: str, config_file: str = '',):
         super().__init__()
         self.nicxt = NIContext(config_file=config_file)
         if host not in self.nicxt.hosts:
@@ -478,7 +478,8 @@ class NICmd(cmd.Cmd):
         print(f"Using host: {self.host.name} with address {self.host.address}")
         self.shared_queue = Queue()
         self.packet_listener = Thread(target=sniff, kwargs={
-            'filter': f"ip dst {self.host.address} and ip proto 254",
+            'iface': iface,
+            'filter': f"ip dst host {self.host.address} and ip proto 254",
             'prn': lambda pkt: self.process_packet(pkt, self.shared_queue)
         })
         self.packet_listener.daemon = True
