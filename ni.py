@@ -739,26 +739,28 @@ class NICmd(cmd.Cmd):
 
     def do_store_var(self, arg):
         "Store a variable's value to a file: store_var <var_name> <filename>"
-        parts = arg.strip().split()
-        if len(parts) != 2:
-            print("Usage: store_var <var_name> <filename>")
-            return
-        var_name, filename = parts
-        if var_name not in self.nicxt.var_store:
-            print(f"Variable '{var_name}' not initialized.")
-            return
-        var = self.nicxt.var_store[var_name]
-        self.nicxt.increase_pc_level(var.level)
-        if not var.has_value:
-            print(f"Variable '{var_name}' has no value assigned.")
-            return
         try:
+            parts = arg.strip().split()
+            if len(parts) != 2:
+                print("Usage: store_var <var_name> <filename>")
+                return
+            var_name, filename = parts
+            if var_name not in self.nicxt.var_store:
+                print(f"Variable '{var_name}' not initialized.")
+                return
+            var = self.nicxt.var_store[var_name]
+            self.nicxt.assert_level_pc(var.level)
+            if not var.has_value:
+                print(f"Variable '{var_name}' has no value assigned.")
+                return
             with open(filename, 'w') as f:
                 data = {'var_name': var_name, 'value': var.value, 'vtype': var.vtype, 'level': str(var.level)}
                 json.dump(data, f)
             print(f"Variable '{var_name}' value stored to {filename}.")
         except Exception as e:
             print(f"Error storing variable to file: {e}")
+        except NIException as nie:
+            print(nie)
 
     def do_read_var(self, arg):
         "Read a variable's value from a file: read_var <filename>"
@@ -774,7 +776,6 @@ class NICmd(cmd.Cmd):
             vtype = data['vtype']
             level_str = data['level']
             level = self.nicxt.lattice.get_element(level_str)
-            self.nicxt.assert_level_pc(level)
             if var_name not in self.nicxt.var_store:
                 print(f"Variable '{var_name}' not initialized. Initializing with level {level_str}.")
                 self.nicxt.var_store[var_name] = NIVar(name=var_name, level=level)
