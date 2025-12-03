@@ -498,6 +498,10 @@ class NICmd(cmd.Cmd):
         elif IPv6 in packet:
             src = IPv6Address(packet[IPv6].src)
         logging.info(f"Received packet from {packet[IP].src} to {packet[IP].dst} with level {level_key}")
+        src_host = self.nicxt.ips_to_hosts.get(str(src), None)
+        if src_host is None:
+            logging.warning(f"Received packet from unknown source address: {src}. Reduced level to L,L.")
+            ni_header.level = self.nicxt.lattice.element_ids['L,L']
         level_id = ni_header.level
         pkt_type = ni_header.pkt_type
         session = ni_header.session
@@ -539,27 +543,18 @@ class NICmd(cmd.Cmd):
             var_name = data.get("var_name", "")
             value = data.get("value", None)
             vtype = data.get("vtype", "int")
-            if var_name not in self.nicxt.var_store:
-                logging.warning(f"Variable '{var_name}' not found for WRITE request from {src}.")
-                if not self.init_var(var_name, level.c, level.i):
-                    self.send_packet(src, level=level, encrypted=ni_header.enc,
-                                     pkt_type="RESPONSE", session=session,
-                                     data={"error": "Variable not found and initialization failed"})
-                    return
-            var = self.nicxt.var_store[var_name]
-            if not self.nicxt.lattice.less_or_equal(level, var.level):
-                logging.warning(f"Unauthorized WRITE request for variable '{var_name}' from {src}.")
+            filename = f"received_{var_name}_{self.session_counter}"
+            try:
+                self.write_value_to_file(var_name=var_name, value=value, vtype=vtype, level=level, filename=filename)
+                logging.info(f"Processed WRITE request for variable '{var_name}' from {src}.")
                 self.send_packet(src, level=level, encrypted=ni_header.enc,
-                                 pkt_type="RESPONSE", session=session,
-                                 data={"error": "Unauthorized access"})
-                return
-            var.value = value
-            var.vtype = vtype
-            var.has_value = True
-            logging.info(f"Processed WRITE request for variable '{var_name}' from {src}.")
-            self.send_packet(src, level=level, encrypted=ni_header.enc,
-                             pkt_type="RESPONSE", session=session,
-                             data={"status": "Success"})
+                                pkt_type="RESPONSE", session=session,
+                                data={"status": "Success"})
+            except:
+                logging.warning(f"Failed WRITE request for variable '{var_name}' from {src}.")
+                self.send_packet(src, level=level, encrypted=ni_header.enc,
+                                pkt_type="RESPONSE", session=session,
+                                data={"error": "Failed to write variable"})
             return
 
     def send_packet(self, dest: IPv4Address | IPv6Address, level: LatticeElement,
@@ -575,14 +570,17 @@ class NICmd(cmd.Cmd):
         route_level_key = self.nicxt.node_conns.get(self.host.name, {}).get(dest_host.name, None)
         route_level = self.nicxt.lattice.get_element(route_level_key) if route_level_key else None
         if dest_host is None or route_level is None:
-            logging.error(f"Destination host with address {dest} not found.")
+            logging.error(f"Destination host with address {dest} not found or unrouted.")
             return
         if not self.nicxt.lattice.less_or_equal(level, dest_host.level):
             logging.warning(f"Packet to {dest} with level {level} exceeds destination host level {dest_host.level}. Lowering level.")
             level = route_level
         if encrypted == 0:
-            logging.warning("Sending unencrypted packet. Integrity level floored to L.")
-            level = self.nicxt.lattice.get_element(f"{level.c},L")
+            if not self.nicxt.lattice.less_or_equal(level, route_level):
+                warn_str = f"Unencrypted packet to {dest} with level {level} exceeds route level {route_level}."
+                logging.warning(warn_str)
+                print(warn_str)
+                return
         if type(dest) == IPv4Address:
             pkt = IP(dst=str(dest))/NIHeader(level=self.nicxt.lattice.element_ids[str(level)],
                                              enc=encrypted, pkt_type=pkt_type, session=session,
@@ -737,6 +735,11 @@ class NICmd(cmd.Cmd):
             return
         print(f"Variable '{var_name}': Value={var.value}, Type={var.vtype}, Level={var.level}")
 
+    def write_value_to_file(self, var_name: str, value: int | str, vtype: str, level: LatticeElement, filename: str):
+            with open(filename, 'w') as f:
+                data = {'var_name': var_name, 'value': value, 'vtype': vtype, 'level': str(level)}
+                json.dump(data, f)
+
     def do_store_var(self, arg):
         "Store a variable's value to a file: store_var <var_name> <filename>"
         try:
@@ -753,10 +756,8 @@ class NICmd(cmd.Cmd):
             if not var.has_value:
                 print(f"Variable '{var_name}' has no value assigned.")
                 return
-            with open(filename, 'w') as f:
-                data = {'var_name': var_name, 'value': var.value, 'vtype': var.vtype, 'level': str(var.level)}
-                json.dump(data, f)
             print(f"Variable '{var_name}' value stored to {filename}.")
+            self.write_value_to_file(var_name, var.value, var.vtype, var.level, filename)
         except Exception as e:
             print(f"Error storing variable to file: {e}")
         except NIException as nie:
@@ -797,12 +798,23 @@ class NICmd(cmd.Cmd):
             print(f"Error reading variable from file: {e}")
 
     def do_send_var(self, arg):
-        "Send a variable's value to another host: send_var <var_name> <dest_host>"
+        """
+        Send a variable's value to another host: send_var <var_name> <dest_host> [encrypted=0]
+        If encrypted is 0 (default), the packet will be sent unencrypted. Else, it will be encrypted.
+        Unencrypted packets may not send secure data over unsecure links.
+        """
         parts = arg.strip().split()
-        if len(parts) != 2:
-            print("Usage: send_var <var_name> <dest_host>")
+        if len(parts) < 2 or len(parts) > 3:
+            print("Usage: send_var <var_name> <dest_host> [encrypted=0]")
             return
-        var_name, dest_host_name = parts
+        var_name, dest_host_name = parts[:2]
+        encrypted = 0
+        if len(parts) == 3:
+            try:
+                encrypted = int(parts[2])
+            except (ValueError):
+                print("Invalid encrypted flag. Must be an integer.")
+                return
         if var_name not in self.nicxt.var_store:
             print(f"Variable '{var_name}' not initialized.")
             return
@@ -816,11 +828,21 @@ class NICmd(cmd.Cmd):
         dest_host = self.nicxt.hosts[dest_host_name]
         try:
             self.nicxt.assert_level_pc(var.level)
-            self.send_packet(dest_host.address, level=var.level, encrypted=1,
+            self.send_packet(dest_host.address, level=var.level, encrypted=encrypted,
                              pkt_type="WRITE", session=self.session_counter,
                              data={"var_name": var_name, "value": var.value, "vtype": var.vtype})
+            while True:
+                packet = self.shared_queue.get()
+                ni_header = packet[NIHeader]
+                if ni_header.session != self.session_counter:
+                    continue
+                response_data = json.loads(packet[Raw].load.decode())
+                if 'error' in response_data:
+                    print(f"Error sending variable: {response_data['error']}")
+                    return
+                print(f"Variable '{var_name}' successfully sent to host '{dest_host_name}'.")
+                break
             self.session_counter += 1
-            print(f"Variable '{var_name}' sent to host '{dest_host_name}'.")
         except NIException as nie:
             print(nie)
         except Exception as e:
