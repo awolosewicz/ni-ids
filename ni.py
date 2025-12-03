@@ -796,6 +796,82 @@ class NICmd(cmd.Cmd):
         except Exception as e:
             print(f"Error reading variable from file: {e}")
 
+    def do_send_var(self, arg):
+        "Send a variable's value to another host: send_var <var_name> <dest_host>"
+        parts = arg.strip().split()
+        if len(parts) != 2:
+            print("Usage: send_var <var_name> <dest_host>")
+            return
+        var_name, dest_host_name = parts
+        if var_name not in self.nicxt.var_store:
+            print(f"Variable '{var_name}' not initialized.")
+            return
+        var = self.nicxt.var_store[var_name]
+        if not var.has_value:
+            print(f"Variable '{var_name}' has no value assigned.")
+            return
+        if dest_host_name not in self.nicxt.hosts:
+            print(f"Destination host '{dest_host_name}' not found.")
+            return
+        dest_host = self.nicxt.hosts[dest_host_name]
+        try:
+            self.nicxt.assert_level_pc(var.level)
+            self.send_packet(dest_host.address, level=var.level, encrypted=1,
+                             pkt_type="WRITE", session=self.session_counter,
+                             data={"var_name": var_name, "value": var.value, "vtype": var.vtype})
+            self.session_counter += 1
+            print(f"Variable '{var_name}' sent to host '{dest_host_name}'.")
+        except NIException as nie:
+            print(nie)
+        except Exception as e:
+            print(f"Error sending variable: {e}")
+
+    def do_retrieve_var(self, arg):
+        "Retrieve a variable from another host, replacing any existing variable: retrieve_var <var_name> <src_host>"
+        parts = arg.strip().split()
+        if len(parts) != 2:
+            print("Usage: retrieve_var <var_name> <src_host>")
+            return
+        var_name, src_host_name = parts
+        if src_host_name not in self.nicxt.hosts:
+            print(f"Source host '{src_host_name}' not found.")
+            return
+        src_host = self.nicxt.hosts[src_host_name]
+        try:
+            self.send_packet(src_host.address, level=self.nicxt.auth_level, encrypted=1,
+                             pkt_type="READ", session=self.session_counter,
+                             data={"var_name": var_name})
+            self.session_counter += 1
+            print(f"Retrieve request for variable '{var_name}' sent to host '{src_host_name}'. Waiting for response...")
+            # Wait for response
+            while True:
+                packet = self.shared_queue.get()
+                ni_header = packet[NIHeader]
+                if ni_header.session != self.session_counter - 1:
+                    continue
+                response_data = json.loads(packet[Raw].load.decode())
+                if 'error' in response_data:
+                    print(f"Error retrieving variable: {response_data['error']}")
+                    return
+                value = response_data.get('value', None)
+                vtype = response_data.get('vtype', 'int')
+                pkt_level: LatticeElement = ni_header.level
+                self.nicxt.increase_pc_level(pkt_level)
+                self.nicxt.assert_level_pc(pkt_level)
+                if var_name in self.nicxt.var_store:
+                    del self.nicxt.var_store[var_name]
+                self.init_var(var_name, pkt_level.c, pkt_level.i)
+                var = self.nicxt.var_store[var_name]
+                var.value = value
+                var.vtype = vtype
+                var.has_value = True
+                print(f"Variable '{var_name}' retrieved from host '{src_host_name}' with value {value} ({vtype}).")
+                return
+        except NIException as nie:
+            print(nie)
+        except Exception as e:
+            print(f"Error retrieving variable: {e}")
+
     def do_dump_vars(self, arg):
         "Dump all variables and their values: dump_vars"
         self.nicxt.increase_pc_level(self.nicxt.var_store_max_lvl)
