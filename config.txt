@@ -12,6 +12,9 @@ L
 pb,h,L,L,10.0.1.11
 n1,h,H,H,10.0.2.11
 n2,h,H,H,10.0.2.12
+pbn1,c,pb,n1,L,L
+pbn2,c,pb,n2,L,L
+n1n2,c,n1,n2,H,H
 admin,u,H,H
 alice,u,A,H
 bob,u,B,H
