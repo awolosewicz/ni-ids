@@ -429,6 +429,8 @@ class NIContext():
         """
         new_pc_level = self.lattice.join(self.pc_level, level)
         if new_pc_level is not None:
+            if not self.lattice.less_or_equal(new_pc_level, self.auth_level):
+                raise NIException("Failed to increase PC level; exceeds authority level.")
             if new_pc_level != self.pc_level:
                 self.set_pc_level(new_pc_level)
         else:
