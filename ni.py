@@ -829,10 +829,11 @@ class NICmd(cmd.Cmd):
 
         try:
             sec_level = self.nicxt.lattice.join(self.nicxt.pc_level, src_level)
+            test_level =self.nicxt.lattice.join(dest_level, self.nicxt.auth_level)
             # Dynamic assignment check from Bay and Askarov 2020
-            if not self.nicxt.lattice.less_or_equal(sec_level, dest_level):
+            if not self.nicxt.lattice.less_or_equal(sec_level, test_level):
                 raise NIException(f"Level of value ({src_level}) join pc ({self.nicxt.pc_level}) ({sec_level}) "
-                                  f"must be <= destination ({dest_level}).")
+                                  f"must be <= destination ({dest_level}) join auth ({self.nicxt.auth_level}) ({test_level}).")
             self.nicxt.var_store[var_name].value = val
             self.nicxt.var_store[var_name].has_value = True
         except KeyError as ke:
@@ -1057,6 +1058,8 @@ class NICmd(cmd.Cmd):
             print(nie)
         except Exception as e:
             print(f"Error retrieving variable: {e}")
+
+    def do_
 
     def do_dump_vars(self, arg):
         "Dump all variables and their values: dump_vars"
