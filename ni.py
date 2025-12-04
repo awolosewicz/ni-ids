@@ -995,18 +995,29 @@ class NICmd(cmd.Cmd):
             print(f"Error sending variable: {e}")
 
     def do_retrieve_var(self, arg):
-        "Retrieve a variable from another host, replacing any existing variable: retrieve_var <var_name> <src_host>"
+        """
+        Retrieve a variable from another host, replacing any existing variable: retrieve_var <var_name> <src_host> [encrypted=0]
+        If encrypted is 0 (default), the packet will be sent unencrypted. Else, it will be encrypted.
+        Unencrypted packets may not retrieve secure data over unsecure links.
+        """
         parts = arg.strip().split()
-        if len(parts) != 2:
-            print("Usage: retrieve_var <var_name> <src_host>")
+        if len(parts) < 2 or len(parts) > 3:
+            print("Usage: retrieve_var <var_name> <src_host> [encrypted=0]")
             return
-        var_name, src_host_name = parts
+        var_name, src_host_name = parts[:2]
+        encrypted = 0
+        if len(parts) == 3:
+            try:
+                encrypted = int(parts[2])
+            except (ValueError):
+                print("Invalid encrypted flag. Must be an integer.")
+                return
         if src_host_name not in self.nicxt.hosts:
             print(f"Source host '{src_host_name}' not found.")
             return
         src_host = self.nicxt.hosts[src_host_name]
         try:
-            ret = self.send_packet(src_host.address, level=self.nicxt.auth_level, encrypted=1,
+            ret = self.send_packet(src_host.address, level=self.nicxt.auth_level, encrypted=encrypted,
                              pkt_type="READ", session=self.session_counter,
                              data={"var_name": var_name},
                              user=self.user.name if self.user else None)
