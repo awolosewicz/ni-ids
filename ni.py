@@ -645,6 +645,7 @@ class NICmd(cmd.Cmd):
             value = data.get("value", None)
             vtype = data.get("vtype", "int")
             filename = f"received_{var_name}_{self.session_counter}"
+            
             try:
                 self.write_value_to_file(var_name=var_name, value=value, vtype=vtype, level=level, filename=filename)
                 logging.info(f"Processed WRITE request for variable '{var_name}' from {src}.")
@@ -819,6 +820,7 @@ class NICmd(cmd.Cmd):
         src_level = self.nicxt.lattice.minimum_element()
         dest_level = self.nicxt.var_store[var_name].level
         if val in self.nicxt.var_store:
+            self.nicxt.increase_pc_level(self.nicxt.var_store[val].level)
             if not self.nicxt.var_store[val].has_value:
                 print(f"Variable '{val}' has no value assigned.")
                 return
