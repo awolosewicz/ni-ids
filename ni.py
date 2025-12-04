@@ -7,7 +7,7 @@ from scapy.layers.inet import IP
 from scapy.layers.inet6 import IPv6
 from scapy.packet import Raw, Packet
 from scapy.sendrecv import send, sniff
-from ni_header import NIHeader
+from ni_header import NIHeader, NIPktType
 import json
 import logging
 
@@ -505,7 +505,7 @@ class NICmd(cmd.Cmd):
             logging.warning(f"Received packet from unknown source address: {src}. Reduced level to L,L.")
             ni_header.level = self.nicxt.lattice.element_ids['L,L']
         level_id = ni_header.level
-        pkt_type = ni_header.pkt_type
+        pkt_type = NIPktType(ni_header.pkt_type).name
         session = ni_header.session
         if pkt_type == "ACK" or pkt_type == "RESPONSE":
             queue.put(packet)

@@ -1,6 +1,13 @@
 from scapy.packet import Packet, bind_layers
 from scapy.fields import IntEnumField, IntField, ShortField, XLongField
 from scapy.layers.inet import IP, TCP, UDP
+import enum
+
+class NIPktType(enum.IntEnum):
+    ACK = 0
+    READ = 1
+    WRITE = 2
+    RESPONSE = 3
 
 class NIHeader(Packet):
     name = "NIHeader"
@@ -9,7 +16,7 @@ class NIHeader(Packet):
         ShortField("enc", 0),
         ShortField("nh", 0),
         IntField("session", 0),
-        IntEnumField("pkt_type", 0, {0: "ACK", 1: "READ", 2: "WRITE", 3: "RESPONSE"}),
+        IntEnumField("pkt_type", 0, NIPktType),
         XLongField("sig", 0)
     ]
 
