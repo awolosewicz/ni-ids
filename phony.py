@@ -40,7 +40,7 @@ if __name__ == "__main__":
 
     if args.pkt_type == 'READ' and not args.enc:
         data = {"var_name": args.var_name}
-        pkt = IP(src=args.src_ip, dst=args.dest_ip)/NIHeader(level=args.level or 0, enc=0, session=1,
+        pkt = IP(src=args.src_ip, dst=args.dest_ip)/NIHeader(level=args.level, enc=0, session=1,
                                                             pkt_type=NIPktType.READ)/Raw(load=json.dumps(data).encode())
         resp = sr1(pkt, verbose=False, filter=f"ip and src host {args.dest_ip} and dst host {args.src_ip} and proto 254")
         print("Sending READ packet...")
@@ -50,7 +50,7 @@ if __name__ == "__main__":
             print("No response received.")
     elif args.pkt_type == 'WRITE' and not args.enc:
         data = {"var_name": args.var_name, "var_value": args.var_value}
-        pkt = IP(src=args.src_ip, dst=args.dest_ip)/NIHeader(level=args.level or 0, enc=0, session=1,
+        pkt = IP(src=args.src_ip, dst=args.dest_ip)/NIHeader(level=args.level, enc=0, session=1,
                                                             pkt_type=NIPktType.WRITE)/Raw(load=json.dumps(data).encode())
         print("Sending WRITE packet...")
         resp = sr1(pkt, verbose=False, filter=f"ip and src host {args.dest_ip} and dst host {args.src_ip} and proto 254")
