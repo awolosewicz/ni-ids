@@ -529,19 +529,20 @@ class NICmd(cmd.Cmd):
                 logging.warning(f"Variable '{var_name}' not found for READ request from {src}.")
                 self.send_packet(src, level=level, encrypted=ni_header.enc,
                                  pkt_type="RESPONSE", session=session,
-                                 data={"error": "Variable not found"})
+                                 data={"error": "Variable not found"}, quiet=True)
                 return
             var = self.nicxt.var_store[var_name]
             if not self.nicxt.lattice.less_or_equal(var.level, level):
                 logging.warning(f"Unauthorized READ request for variable '{var_name}' from {src}.")
                 self.send_packet(src, level=level, encrypted=ni_header.enc,
                                  pkt_type="RESPONSE", session=session,
-                                 data={"error": "Unauthorized access"})
+                                 data={"error": "Unauthorized access"}, quiet=True)
                 return
             logging.info(f"Processing READ request for variable '{var_name}' from {src}.")
             self.send_packet(src, level=level, encrypted=ni_header.enc,
                              pkt_type="RESPONSE", session=session,
-                             data={"var_name": var_name, "value": var.value, "vtype": var.vtype})
+                             data={"var_name": var_name, "value": var.value, "vtype": var.vtype},
+                             quiet=True)
             return
         elif pkt_type == "WRITE":
             # For writing, the sender is providing data with the val level as level
@@ -554,16 +555,16 @@ class NICmd(cmd.Cmd):
                 logging.info(f"Processed WRITE request for variable '{var_name}' from {src}.")
                 self.send_packet(src, level=level, encrypted=ni_header.enc,
                                 pkt_type="RESPONSE", session=session,
-                                data={"status": "Success"})
+                                data={"status": "Success"}, quiet=True)
             except:
                 logging.warning(f"Failed WRITE request for variable '{var_name}' from {src}.")
                 self.send_packet(src, level=level, encrypted=ni_header.enc,
                                 pkt_type="RESPONSE", session=session,
-                                data={"error": "Failed to write variable"})
+                                data={"error": "Failed to write variable"}, quiet=True)
             return
 
     def send_packet(self, dest: IPv4Address | IPv6Address, level: LatticeElement,
-                    encrypted: int, pkt_type: str, session: int, data) -> None:
+                    encrypted: int, pkt_type: str, session: int, data, quiet: bool = False) -> None:
         """
         Send a packet from the current host to the destination host with the given security level.
         """
@@ -595,7 +596,8 @@ class NICmd(cmd.Cmd):
                                              enc=encrypted, pkt_type=pkt_type, session=session,
                                              sig=signature)/Raw(load=rawdata.encode())
         send(pkt, verbose=0)
-        print(f"Packet sent from {self.host.name} to {dest}.")
+        if not quiet:
+            print(f"Packet sent from {self.host.name} to {dest}.")
 
     def do_login(self, arg):
         "Login to a given user, resetting environment: login <username>"
