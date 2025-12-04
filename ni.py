@@ -930,7 +930,7 @@ class NICmd(cmd.Cmd):
                 if time.time() - start > PACKET_TIMEOUT_S:
                     print(f"Timeout waiting for response for variable '{var_name}' sent to host '{dest_host_name}'.")
                     return
-                packet = self.shared_queue.get()
+                packet = self.shared_queue.get(timeout=PACKET_TIMEOUT_S)
                 ni_header = packet[NIHeader]
                 if ni_header.session != self.session_counter:
                     continue
@@ -972,7 +972,7 @@ class NICmd(cmd.Cmd):
                 if time.time() - start > PACKET_TIMEOUT_S:
                     print(f"Timeout waiting for response for variable '{var_name}' from host '{src_host_name}'.")
                     return
-                packet = self.shared_queue.get()
+                packet = self.shared_queue.get(timeout=PACKET_TIMEOUT_S)
                 ni_header = packet[NIHeader]
                 if ni_header.session != self.session_counter - 1:
                     continue
