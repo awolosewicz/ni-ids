@@ -614,9 +614,9 @@ class NICmd(cmd.Cmd):
             try:
                 logging.warning("Received unencrypted packet; dropped level to L,L.")
                 data = json.loads(rawdata.decode())
-                level = self.nicxt.lattice.lattice_element("L,L")
-            except Exception:
-                logging.warning("Malformed JSON payload; rejecting.")
+                level = self.nicxt.lattice.get_element("L,L")
+            except Exception as e:
+                logging.warning(f"Malformed JSON payload: {e}")
                 return
 
         if pkt_type == "READ":
