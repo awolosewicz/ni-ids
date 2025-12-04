@@ -693,7 +693,7 @@ class NICmd(cmd.Cmd):
                 signer = None
                 if user is not None and user in self.nicxt.hosts:
                     if not self.nicxt.lattice.less_or_equal(level, route_level):
-                        if not self.nicxt.lattice.less_or_equal(level, self.nicxt.hosts[user].level):
+                        if not self.nicxt.lattice.less_or_equal(level, self.nicxt.auth_level):
                             warn_str = f"Encrypted packet to {dest} with level {level} exceeds route level {route_level} and user {user} lacks authority."
                             logging.warning(warn_str)
                             if not quiet:
