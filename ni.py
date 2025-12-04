@@ -644,7 +644,7 @@ class NICmd(cmd.Cmd):
             var_name = data.get("var_name", "")
             value = data.get("value", None)
             vtype = data.get("vtype", "int")
-            filename = f"received_{var_name}_{self.session_counter}"
+            filename = f"{src_host.name}_{var_name}"
             
             try:
                 self.write_value_to_file(var_name=var_name, value=value, vtype=vtype, level=level, filename=filename)
@@ -1058,8 +1058,6 @@ class NICmd(cmd.Cmd):
             print(nie)
         except Exception as e:
             print(f"Error retrieving variable: {e}")
-
-    def do_
 
     def do_dump_vars(self, arg):
         "Dump all variables and their values: dump_vars"
