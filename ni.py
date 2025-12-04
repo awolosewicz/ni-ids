@@ -7,6 +7,7 @@ from scapy.layers.inet import IP
 from scapy.layers.inet6 import IPv6
 from scapy.packet import Raw, Packet
 from scapy.sendrecv import send, sniff
+from scapy.config import conf
 from ni_header import NIHeader, NIPktType
 import json
 import logging
@@ -14,8 +15,28 @@ import base64
 from nacl.public import PrivateKey, PublicKey, SealedBox
 from nacl.signing import SigningKey, VerifyKey
 import time
+import subprocess
 
 PACKET_TIMEOUT_S = 5
+
+def sync_kernel_arp_to_scapy():
+    """
+    Sync the kernel's ARP/neighbor table into Scapy's netcache.
+    This lets Scapy reuse MAC addresses the kernel already knows.
+    """
+    try:
+        out = subprocess.check_output(["ip", "neigh"], stderr=subprocess.DEVNULL).decode()
+    except Exception as e:
+        logging.warning(f"Failed to read kernel ARP table: {e}")
+        return
+    for line in out.splitlines():
+        parts = line.split()
+        # Expected format: "IP dev IFACE lladdr MAC STATE"
+        if len(parts) >= 5 and parts[3] == "lladdr":
+            ip = parts[0]
+            mac = parts[4]
+            conf.netcache.arp_cache[ip] = mac
+    logging.info(f"Synced kernel ARP table to Scapy netcache: {conf.netcache.arp_cache}")
 
 class LatticeElement():
     """
@@ -698,6 +719,7 @@ class NICmd(cmd.Cmd):
         elif type(dest) == IPv6Address:
             pkt = IPv6(src=str(self.host.address), dst=str(dest))/NIHeader(level=self.nicxt.lattice.element_ids[str(level)],
                                              enc=encrypted, pkt_type=pkt_type, session=session)/Raw(load=rawdata)
+        sync_kernel_arp_to_scapy()
         send(pkt, verbose=0)
         if not quiet:
             print(f"Packet sent from {self.host.name} to {dest}.")
