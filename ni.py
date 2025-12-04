@@ -1039,6 +1039,48 @@ class NICmd(cmd.Cmd):
         except Exception as e:
             print(f"Error reading variable from file: {e}")
 
+    def get_packet_data(self, pkt: Packet) -> dict | None:
+        """
+        Extract and return the data from a NI packet.
+        """
+        ni_header = pkt[NIHeader]
+        rawdata = pkt[Raw].load
+        if ni_header.enc:
+            try:
+                encdata = json.loads(rawdata.decode())
+                cipher = base64.b64decode(encdata.get('cipher', ''))
+                sig = base64.b64decode(encdata.get('sig', ''))
+                verifier = None
+                signer_name = encdata.get('signer')
+                if signer_name and signer_name in self.nicxt.hosts:
+                    verifier = self.nicxt.hosts[signer_name].sign_pub
+                elif signer_name and signer_name in self.nicxt.users:
+                    verifier = self.nicxt.users[signer_name].sign_pub
+                if verifier is None:
+                    logging.warning("No verifier found for signed message; rejecting.")
+                    return None
+                try:
+                    verifier.verify(cipher, sig)
+                except Exception:
+                    logging.warning("Signature verification failed; rejecting packet.")
+                    return None
+                try:
+                    plaintext = SealedBox(self.host.enc_priv).decrypt(cipher)
+                    data = json.loads(plaintext.decode())
+                except Exception:
+                    logging.warning("Decryption failed; rejecting packet.")
+                    return None
+            except Exception as e:
+                logging.warning(f"Malformed encrypted payload: {e}")
+                return None
+        else:
+            try:
+                data = json.loads(rawdata.decode())
+            except Exception:
+                logging.warning("Malformed JSON payload; rejecting.")
+                return None
+        return data
+
     def do_send_var(self, arg):
         """
         Send a variable's value to another host: send_var <var_name> <dest_host> [encrypted=0]
@@ -1086,9 +1128,11 @@ class NICmd(cmd.Cmd):
                 ni_header = packet[NIHeader]
                 if ni_header.session != self.session_counter:
                     continue
-                response_data = json.loads(packet[Raw].load.decode())
-                if 'error' in response_data:
-                    print(f"Error sending variable: {response_data['error']}")
+                data = self.get_packet_data(packet)
+                if data is None:
+                    continue
+                if 'error' in data:
+                    print(f"Error sending variable: {data['error']}")
                     return
                 print(f"Variable '{var_name}' successfully sent to host '{dest_host_name}'.")
                 break
@@ -1139,12 +1183,14 @@ class NICmd(cmd.Cmd):
                 ni_header = packet[NIHeader]
                 if ni_header.session != self.session_counter - 1:
                     continue
-                response_data = json.loads(packet[Raw].load.decode())
-                if 'error' in response_data:
-                    print(f"Error retrieving variable: {response_data['error']}")
+                data = self.get_packet_data(packet)
+                if data is None:
+                    continue
+                if 'error' in data:
+                    print(f"Error response received: {data['error']}")
                     return
-                value = response_data.get('value', None)
-                vtype = response_data.get('vtype', 'int')
+                value = data.get('value', None)
+                vtype = data.get('vtype', 'int')
                 pkt_level: LatticeElement = ni_header.level
                 self.nicxt.increase_pc_level(pkt_level)
                 self.nicxt.assert_level_pc(pkt_level)
@@ -1160,7 +1206,7 @@ class NICmd(cmd.Cmd):
         except NIException as nie:
             print(nie)
         except Exception as e:
-            print(f"Error retrieving variable: {e}")
+            print(f"Exception retrieving variable: {e}")
 
     def do_dump_vars(self, arg):
         "Dump all variables and their values: dump_vars"
@@ -1226,9 +1272,3 @@ class NICmd(cmd.Cmd):
     def do_quit(self, arg):
         "Exit the NI command interface."
         return self.do_exit(arg)
-    
-    #TODO: Remove test command
-    def do_test(self, arg):
-        args = arg.split()
-        self.nicxt.pcdecl(level_from=self.nicxt.lattice.elements[args[0]],
-                          level_to=self.nicxt.lattice.elements[args[1]], verbose=True)
