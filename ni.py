@@ -808,15 +808,18 @@ class NICmd(cmd.Cmd):
     def do_print_var(self, arg):
         "Print a variable's value: print_var <var_name>"
         var_name = arg.strip()
-        if var_name not in self.nicxt.var_store:
-            print(f"Variable '{var_name}' not initialized.")
-            return
-        var = self.nicxt.var_store[var_name]
-        self.nicxt.increase_pc_level(var.level)
-        if not var.has_value:
-            print(f"Variable '{var_name}' has no value assigned.")
-            return
-        print(f"Variable '{var_name}': Value={var.value}, Type={var.vtype}, Level={var.level}")
+        try:
+            if var_name not in self.nicxt.var_store:
+                print(f"Variable '{var_name}' not initialized.")
+                return
+            var = self.nicxt.var_store[var_name]
+            self.nicxt.increase_pc_level(var.level)
+            if not var.has_value:
+                print(f"Variable '{var_name}' has no value assigned.")
+                return
+            print(f"Variable '{var_name}': Value={var.value}, Type={var.vtype}, Level={var.level}")
+        except NIException as nie:
+            print(nie)
 
     def write_value_to_file(self, var_name: str, value: int | str, vtype: str, level: LatticeElement, filename: str):
             with open(filename, 'w') as f:
