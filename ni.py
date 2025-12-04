@@ -657,18 +657,18 @@ class NICmd(cmd.Cmd):
                     "sig": base64.b64encode(sig).decode(),
                     "signer": signer.name
                 }
-                raw_payload = json.dumps(payload).encode()
+                rawdata = json.dumps(payload).encode()
             except Exception as e:
                 logging.error(f"Failed to encrypt/sign payload: {e}")
                 return
-            raw_payload = rawdata.encode()
+            rawdata = rawdata.encode()
 
         if type(dest) == IPv4Address:
             pkt = IP(src=str(self.host.address), dst=str(dest))/NIHeader(level=self.nicxt.lattice.element_ids[str(level)],
-                                             enc=encrypted, pkt_type=pkt_type, session=session)/Raw(load=raw_payload)
+                                             enc=encrypted, pkt_type=pkt_type, session=session)/Raw(load=rawdata)
         elif type(dest) == IPv6Address:
             pkt = IPv6(src=str(self.host.address), dst=str(dest))/NIHeader(level=self.nicxt.lattice.element_ids[str(level)],
-                                             enc=encrypted, pkt_type=pkt_type, session=session)/Raw(load=raw_payload)
+                                             enc=encrypted, pkt_type=pkt_type, session=session)/Raw(load=rawdata)
         send(pkt, verbose=0)
         if not quiet:
             print(f"Packet sent from {self.host.name} to {dest}.")
