@@ -11,8 +11,8 @@ from ni_header import NIHeader, NIPktType
 import json
 import logging
 import base64
-from nacl.public import PrivateKey, SealedBox
-from nacl.signing import SigningKey
+from nacl.public import PrivateKey, PublicKey, SealedBox
+from nacl.signing import SigningKey, VerifyKey
 import time
 
 PACKET_TIMEOUT_S = 5
@@ -267,6 +267,18 @@ class NIHost():
         self.enc_pub = self.enc_priv.public_key
         self.sign_priv = SigningKey.generate()
         self.sign_pub = self.sign_priv.verify_key
+        for key_file in ["keys/{}_priv_key".format(name), "keys/{}_sign_key".format(name)]:
+            try:
+                with open(key_file, "rb") as f:
+                    key_data = base64.b64decode(f.read())
+                    if "priv_key" in key_file:
+                        self.enc_priv = PrivateKey(key_data)
+                        self.enc_pub = self.enc_priv.public_key
+                    elif "sign_key" in key_file:
+                        self.sign_priv = SigningKey(key_data)
+                        self.sign_pub = self.sign_priv.verify_key
+            except FileNotFoundError:
+                logging.warning(f"Key file {key_file} not found; generating new keys for host {name}.")
         if address is not None:
             self.address_type = type(address).__name__
         else:
@@ -299,6 +311,18 @@ class NIUser():
         self.enc_pub = self.enc_priv.public_key
         self.sign_priv = SigningKey.generate()
         self.sign_pub = self.sign_priv.verify_key
+        for key_file in ["keys/{}_priv_key".format(name), "keys/{}_sign_key".format(name)]:
+            try:
+                with open(key_file, "rb") as f:
+                    key_data = base64.b64decode(f.read())
+                    if "priv_key" in key_file:
+                        self.enc_priv = PrivateKey(key_data)
+                        self.enc_pub = self.enc_priv.public_key
+                    elif "sign_key" in key_file:
+                        self.sign_priv = SigningKey(key_data)
+                        self.sign_pub = self.sign_priv.verify_key
+            except FileNotFoundError:
+                logging.warning(f"Key file {key_file} not found; generating new keys for host {name}.")
 
     def __repr__(self):
         return f"NIUser(name={self.name}, level={self.level})"
