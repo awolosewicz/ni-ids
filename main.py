@@ -25,9 +25,11 @@ def sync_kernel_arp_to_scapy():
     logging.info(f"Synced kernel ARP table to Scapy netcache: {conf.netcache.arp_cache}")
 
 if __name__ == "__main__":
+    fh = logging.FileHandler("ni.log")
+    fh.setLevel(logging.INFO)
+    fh.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    logging.getLogger().addHandler(fh)
     sync_kernel_arp_to_scapy()
-    logging.basicConfig(filename=f"ni.log", level=logging.INFO,
-                        format='%(asctime)s - %(levelname)s - %(message)s')
     parser = argparse.ArgumentParser(description="Non-Interference Information Flow Control System")
     parser.add_argument('--config', type=str, help='Path to configuration file to load on startup')
     parser.add_argument('host', type=str, help='The host to simulate')
