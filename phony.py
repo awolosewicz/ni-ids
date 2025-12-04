@@ -31,7 +31,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Send a phony NI packet")
     parser.add_argument('src_ip', type=str, help='Source IP address')
     parser.add_argument('dest_ip', type=str, help='Destination IP address')
-    parser.add_argument('--iface', type=str, help='Network interface to send the packet on')
     parser.add_argument('--level', type=int, help='Security level ID')
     parser.add_argument('--enc', action='store_true', help='Set if the packet is encrypted')
     parser.add_argument('--pkt_type', type=str, choices=['ACK', 'READ', 'WRITE', 'RESPONSE'], default='READ', help='Packet type')
@@ -43,7 +42,7 @@ if __name__ == "__main__":
         data = {"var_name": args.var_name}
         pkt = IP(src=args.src_ip, dst=args.dest_ip)/NIHeader(level=args.level or 0, enc=0, session=1,
                                                             pkt_type=NIPktType.READ)/Raw(load=json.dumps(data).encode())
-        resp = sr1(pkt, iface=args.iface, verbose=False)
+        resp = sr1(pkt, verbose=False, filter=f"ip and src host {args.dest_ip} and dst host {args.src_ip} and proto 254")
         print("Sending READ packet...")
         if resp and Raw in resp:
             print(f"Received response: {resp[Raw].load.decode()}")
@@ -54,7 +53,7 @@ if __name__ == "__main__":
         pkt = IP(src=args.src_ip, dst=args.dest_ip)/NIHeader(level=args.level or 0, enc=0, session=1,
                                                             pkt_type=NIPktType.WRITE)/Raw(load=json.dumps(data).encode())
         print("Sending WRITE packet...")
-        resp = sr1(pkt, iface=args.iface, verbose=False)
+        resp = sr1(pkt, verbose=False, filter=f"ip and src host {args.dest_ip} and dst host {args.src_ip} and proto 254")
         if resp and Raw in resp:
             print(f"Received response: {resp[Raw].load.decode()}")
         else:
