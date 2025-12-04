@@ -140,7 +140,7 @@ class Lattice():
     
     def dump_lattice(self):
         for key, elem in self.elements.items():
-            print(f"Element: {key}")
+            print(f"Element: {key}, ID: {self.element_ids[key]}")
             print(f"  Upper: {elem.upper}")
             print(f"  Lower: {elem.lower}")
 
