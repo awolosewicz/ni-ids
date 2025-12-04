@@ -515,8 +515,7 @@ class NIContext():
         """
         Assert that the PC level is less than or equal to the given level.
         """
-        test_level = self.lattice.join(level, self.auth_level)
-        if not self.lattice.less_or_equal(self.pc_level, test_level):
+        if not self.lattice.less_or_equal(self.pc_level, level):
             raise NIException("PC level not less or equal to the given level.")
 
 class NICmd(cmd.Cmd):
@@ -830,11 +829,10 @@ class NICmd(cmd.Cmd):
 
         try:
             sec_level = self.nicxt.lattice.join(self.nicxt.pc_level, src_level)
-            test_level =self.nicxt.lattice.join(dest_level, self.nicxt.auth_level)
             # Dynamic assignment check from Bay and Askarov 2020
-            if not self.nicxt.lattice.less_or_equal(sec_level, test_level):
+            if not self.nicxt.lattice.less_or_equal(sec_level, dest_level):
                 raise NIException(f"Level of value ({src_level}) join pc ({self.nicxt.pc_level}) ({sec_level}) "
-                                  f"must be <= destination ({dest_level}) join auth ({self.nicxt.auth_level}) ({test_level}).")
+                                  f"must be <= destination ({dest_level}).")
             self.nicxt.var_store[var_name].value = val
             self.nicxt.var_store[var_name].has_value = True
         except KeyError as ke:
@@ -879,6 +877,110 @@ class NICmd(cmd.Cmd):
             with open(filename, 'w') as f:
                 data = {'var_name': var_name, 'value': value, 'vtype': vtype, 'level': str(level)}
                 json.dump(data, f)
+
+    def do_change_pc(self, arg):
+        "Change the PC level: change_pc <conf_level> <integ_level>"
+        parts = arg.strip().split()
+        if len(parts) != 2:
+            print("Usage: change_pc <conf_level> <integ_level>")
+            return
+        conf_level, integ_level = parts
+        level_key = f"{conf_level},{integ_level}"
+        try:
+            level = self.nicxt.lattice.get_element(level_key)
+            self.nicxt.pcdecl(level_from=self.nicxt.pc_level, level_to=level)
+        except KeyError as ke:
+            print(ke)
+        except NIException as nie:
+            print(nie)
+        except Exception as e:
+            print(f"Error changing PC level: {e}")
+
+    def do_declassify(self, arg):
+        "Declassify a variable to a lower confidentiality level: declassify <src_var_name> <dst_var_name> <new_conf_level>"
+        parts = arg.strip().split()
+        if len(parts) != 3:
+            print("Usage: declassify <src_var_name> <dst_var_name> <new_conf_level>")
+            return
+        src_var_name, dst_var_name, new_conf_level = parts
+        try:
+            if src_var_name not in self.nicxt.var_store:
+                print(f"Variable '{src_var_name}' not initialized.")
+                return
+            if dst_var_name not in self.nicxt.var_store:
+                print(f"Variable '{dst_var_name}' not initialized.")
+                return
+            if src_var_name == dst_var_name:
+                print("New variable name must be different from the original.")
+                return
+            src_var = self.nicxt.var_store[src_var_name]
+            dst_var = self.nicxt.var_store[dst_var_name]
+            new_level_key = f"{new_conf_level},{src_var.level.i}"
+            new_level = self.nicxt.lattice.get_element(new_level_key)
+            sec_level = self.nicxt.lattice.join(self.nicxt.pc_level, new_level)
+            if not self.nicxt.pc_level.i == "H" or not self.nicxt.auth_level.i == "H" or not src_var.level.i == "H":
+                print("Declassification requires high integrity in PC, Auth, and src levels.")
+                return
+            if not self.nicxt.lattice.less_or_equal(sec_level, dst_var.level):
+                print(f"PC join new level {sec_level} must be less than or equal to dst var level {dst_var.level}.")
+                return
+            test_level = self.nicxt.lattice.join(self.nicxt.auth_level, new_level)
+            if not self.nicxt.lattice.less_or_equal(src_var.level, test_level):
+                print(f"Src level {src_var.level} must be less than or equal to auth join new level {test_level}.")
+                return
+            dst_var.vtype = src_var.vtype
+            dst_var.value = src_var.value
+            dst_var.has_value = src_var.has_value
+            print(f"Variable '{src_var_name}' endorsed to {dst_var_name}.")
+        except KeyError as ke:
+            print(ke)
+        except NIException as nie:
+            print(nie)
+        except Exception as e:
+            print(f"Error endorsing variable: {e}")
+
+    def do_endorse(self, arg):
+        "Endorse a variable to a higher integrity level: endorse <src_var_name> <dst_var_name> <new_integ_level>"
+        parts = arg.strip().split()
+        if len(parts) != 3:
+            print("Usage: endorse <src_var_name> <dst_var_name> <new_integ_level>")
+            return
+        src_var_name, dst_var_name, new_integ_level = parts
+        try:
+            if src_var_name not in self.nicxt.var_store:
+                print(f"Variable '{src_var_name}' not initialized.")
+                return
+            if dst_var_name not in self.nicxt.var_store:
+                print(f"Variable '{dst_var_name}' not initialized.")
+                return
+            if src_var_name == dst_var_name:
+                print("New variable name must be different from the original.")
+                return
+            src_var = self.nicxt.var_store[src_var_name]
+            dst_var = self.nicxt.var_store[dst_var_name]
+            new_level_key = f"{src_var.level.c},{new_integ_level}"
+            new_level = self.nicxt.lattice.get_element(new_level_key)
+            sec_level = self.nicxt.lattice.join(self.nicxt.pc_level, new_level)
+            if not src_var.level.i == "L" or not new_level.i == "H":
+                print("Endorsement requires src level integrity low and new level integrity high.")
+                return
+            if not self.nicxt.lattice.less_or_equal(sec_level, dst_var.level):
+                print(f"PC join new level {sec_level} must be less than or equal to dst var level {dst_var.level}.")
+                return
+            test_level = self.nicxt.lattice.join(self.nicxt.auth_level, new_level)
+            if not self.nicxt.lattice.less_or_equal(src_var.level, test_level):
+                print(f"Src level {src_var.level} must be less than or equal to auth join new level {test_level}.")
+                return
+            dst_var.vtype = src_var.vtype
+            dst_var.value = src_var.value
+            dst_var.has_value = src_var.has_value
+            print(f"Variable '{src_var_name}' endorsed to {dst_var_name}.")
+        except KeyError as ke:
+            print(ke)
+        except NIException as nie:
+            print(nie)
+        except Exception as e:
+            print(f"Error endorsing variable: {e}")
 
     def do_store_var(self, arg):
         "Store a variable's value to a file: store_var <var_name> <filename>"
