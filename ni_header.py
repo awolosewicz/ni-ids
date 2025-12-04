@@ -1,5 +1,5 @@
 from scapy.packet import Packet, bind_layers
-from scapy.fields import IntEnumField, IntField, ShortField, XLongField
+from scapy.fields import IntEnumField, IntField, ShortField
 from scapy.layers.inet import IP, TCP, UDP
 import enum
 
@@ -17,7 +17,6 @@ class NIHeader(Packet):
         ShortField("nh", 0),
         IntField("session", 0),
         IntEnumField("pkt_type", 0, NIPktType),
-        XLongField("sig", 0)
     ]
 
 bind_layers(IP, NIHeader, proto=254)

@@ -10,6 +10,9 @@ from scapy.sendrecv import send, sniff
 from ni_header import NIHeader, NIPktType
 import json
 import logging
+import base64
+from nacl.public import PrivateKey, PublicKey, SealedBox
+from nacl.signing import SigningKey, VerifyKey
 
 class LatticeElement():
     """
@@ -257,6 +260,10 @@ class NIHost():
         self.level = level
         self.edges: set[str] = set()
         self.address: IPv4Address | IPv6Address | None = address
+        self.enc_priv = PrivateKey.generate()
+        self.enc_pub = self.enc_priv.public_key
+        self.sign_priv = SigningKey.generate()
+        self.sign_pub = self.sign_priv.verify_key
         if address is not None:
             self.address_type = type(address).__name__
         else:
@@ -285,6 +292,10 @@ class NIUser():
     def __init__(self, name: str, level: LatticeElement):
         self.name = name
         self.level = level
+        self.enc_priv = PrivateKey.generate()
+        self.enc_pub = self.enc_priv.public_key
+        self.sign_priv = SigningKey.generate()
+        self.sign_pub = self.sign_priv.verify_key
 
     def __repr__(self):
         return f"NIUser(name={self.name}, level={self.level})"
@@ -520,7 +531,41 @@ class NICmd(cmd.Cmd):
             return
         level = self.nicxt.lattice.get_element(level_key)
         logging.info(f"Received packet from {packet[IP].src} to {packet[IP].dst} with level {level_key}")
-        data = json.loads(packet[Raw].load.decode())
+        rawdata = packet[Raw].load
+        if ni_header.enc:
+            try:
+                encdata = json.loads(rawdata.decode())
+                cipher = base64.b64decode(encdata.get('cipher', ''))
+                sig = base64.b64decode(encdata.get('sig', ''))
+                verifier = None
+                signer_name = encdata.get('signer')
+                if signer_name and signer_name in self.nicxt.hosts:
+                    verifier = self.nicxt.hosts[signer_name].sign_pub
+                elif signer_name and signer_name in self.nicxt.users:
+                    verifier = self.nicxt.users[signer_name].sign_pub
+                if verifier is None:
+                    logging.warning("No verifier found for signed message; rejecting.")
+                    return
+                try:
+                    verifier.verify(cipher, sig)
+                except Exception:
+                    logging.warning("Signature verification failed; rejecting packet.")
+                    return
+                try:
+                    plaintext = SealedBox(self.host.enc_priv).decrypt(cipher)
+                    data = json.loads(plaintext.decode())
+                except Exception:
+                    logging.warning("Decryption failed; rejecting packet.")
+                    return
+            except Exception as e:
+                logging.warning(f"Malformed encrypted payload: {e}")
+                return
+        else:
+            try:
+                data = json.loads(rawdata.decode())
+            except Exception:
+                logging.warning("Malformed JSON payload; rejecting.")
+                return
 
         if pkt_type == "READ":
             # For reading, the sender is requesting with their auth as level
@@ -563,14 +608,20 @@ class NICmd(cmd.Cmd):
                                 data={"error": "Failed to write variable"}, quiet=True)
             return
 
-    def send_packet(self, dest: IPv4Address | IPv6Address, level: LatticeElement,
-                    encrypted: int, pkt_type: str, session: int, data, quiet: bool = False) -> None:
+    def send_packet(
+            self,
+            dest: IPv4Address | IPv6Address,
+            level: LatticeElement,
+            encrypted: int,
+            pkt_type: str,
+            session: int,
+            data,
+            quiet: bool = False,
+            user: str = None) -> None:
         """
         Send a packet from the current host to the destination host with the given security level.
         """
-        signature = 0  # TODO: signature generation
         pkt = None
-        #TODO: Ensure that type works with string args for the enum
         rawdata = json.dumps(data)
         dest_host = self.nicxt.ips_to_hosts.get(str(dest), None)
         route_level_key = self.nicxt.node_conns.get(self.host.name, {}).get(dest_host.name, None)
@@ -578,23 +629,46 @@ class NICmd(cmd.Cmd):
         if dest_host is None or route_level is None:
             logging.error(f"Destination host with address {dest} not found or unrouted.")
             return
-        if not self.nicxt.lattice.less_or_equal(level, dest_host.level):
-            logging.warning(f"Packet to {dest} with level {level} exceeds destination host level {dest_host.level}. Lowering level.")
-            level = route_level
         if encrypted == 0:
             if not self.nicxt.lattice.less_or_equal(level, route_level):
                 warn_str = f"Unencrypted packet to {dest} with level {level} exceeds route level {route_level}."
                 logging.warning(warn_str)
-                print(warn_str)
+                if not quiet:
+                    print(warn_str)
                 return
+        else:
+            try:
+                signer = None
+                if user is not None and user in self.nicxt.hosts:
+                    if not self.nicxt.lattice.less_or_equal(level, route_level):
+                        if not self.nicxt.lattice.less_or_equal(level, self.nicxt.hosts[user].level):
+                            warn_str = f"Encrypted packet to {dest} with level {level} exceeds route level {route_level} and user {user} lacks authority."
+                            logging.warning(warn_str)
+                            if not quiet:
+                                print(warn_str)
+                            return
+                    signer = self.nicxt.users[user]
+                else:
+                    signer = self.host
+                cipher = SealedBox(dest_host.enc_pub).encrypt(rawdata.encode())
+                sig = signer.sign_priv.sign(cipher).signature
+                payload = {
+                    "cipher": base64.b64encode(cipher).decode(),
+                    "sig": base64.b64encode(sig).decode(),
+                    "signer": signer.name
+                }
+                raw_payload = json.dumps(payload).encode()
+            except Exception as e:
+                logging.error(f"Failed to encrypt/sign payload: {e}")
+                return
+            raw_payload = rawdata.encode()
+
         if type(dest) == IPv4Address:
             pkt = IP(src=str(self.host.address), dst=str(dest))/NIHeader(level=self.nicxt.lattice.element_ids[str(level)],
-                                             enc=encrypted, pkt_type=pkt_type, session=session,
-                                             sig=signature)/Raw(load=rawdata.encode())
+                                             enc=encrypted, pkt_type=pkt_type, session=session)/Raw(load=raw_payload)
         elif type(dest) == IPv6Address:
             pkt = IPv6(src=str(self.host.address), dst=str(dest))/NIHeader(level=self.nicxt.lattice.element_ids[str(level)],
-                                             enc=encrypted, pkt_type=pkt_type, session=session,
-                                             sig=signature)/Raw(load=rawdata.encode())
+                                             enc=encrypted, pkt_type=pkt_type, session=session)/Raw(load=raw_payload)
         send(pkt, verbose=0)
         if not quiet:
             print(f"Packet sent from {self.host.name} to {dest}.")
@@ -837,7 +911,8 @@ class NICmd(cmd.Cmd):
             self.nicxt.assert_level_pc(var.level)
             self.send_packet(dest_host.address, level=var.level, encrypted=encrypted,
                              pkt_type="WRITE", session=self.session_counter,
-                             data={"var_name": var_name, "value": var.value, "vtype": var.vtype})
+                             data={"var_name": var_name, "value": var.value, "vtype": var.vtype},
+                             user=self.user.name if self.user else None)
             while True:
                 packet = self.shared_queue.get()
                 ni_header = packet[NIHeader]
@@ -869,10 +944,10 @@ class NICmd(cmd.Cmd):
         try:
             self.send_packet(src_host.address, level=self.nicxt.auth_level, encrypted=1,
                              pkt_type="READ", session=self.session_counter,
-                             data={"var_name": var_name})
+                             data={"var_name": var_name},
+                             user=self.user.name if self.user else None)
             self.session_counter += 1
             print(f"Retrieve request for variable '{var_name}' sent to host '{src_host_name}'. Waiting for response...")
-            # Wait for response
             while True:
                 packet = self.shared_queue.get()
                 ni_header = packet[NIHeader]
