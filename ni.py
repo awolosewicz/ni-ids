@@ -515,7 +515,8 @@ class NIContext():
         """
         Assert that the PC level is less than or equal to the given level.
         """
-        if not self.lattice.less_or_equal(self.pc_level, level):
+        test_level = self.lattice.join(level, self.auth_level)
+        if not self.lattice.less_or_equal(self.pc_level, test_level):
             raise NIException("PC level not less or equal to the given level.")
 
 class NICmd(cmd.Cmd):
