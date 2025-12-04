@@ -7,6 +7,7 @@ if __name__ == "__main__":
     fh.setLevel(logging.INFO)
     fh.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
     logging.getLogger().addHandler(fh)
+    logging.getLogger().setLevel(logging.INFO)
     parser = argparse.ArgumentParser(description="Non-Interference Information Flow Control System")
     parser.add_argument('--config', type=str, help='Path to configuration file to load on startup')
     parser.add_argument('host', type=str, help='The host to simulate')

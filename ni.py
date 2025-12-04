@@ -612,7 +612,9 @@ class NICmd(cmd.Cmd):
                 return
         else:
             try:
+                logging.warning("Received unencrypted packet; dropped level to L,L.")
                 data = json.loads(rawdata.decode())
+                level = self.nicxt.lattice.lattice_element("L,L")
             except Exception:
                 logging.warning("Malformed JSON payload; rejecting.")
                 return
@@ -691,7 +693,7 @@ class NICmd(cmd.Cmd):
         else:
             try:
                 signer = None
-                if user is not None and user in self.nicxt.hosts:
+                if user is not None and user in self.nicxt.users:
                     if not self.nicxt.lattice.less_or_equal(level, route_level):
                         if not self.nicxt.lattice.less_or_equal(level, self.nicxt.auth_level):
                             warn_str = f"Encrypted packet to {dest} with level {level} exceeds route level {route_level} and user {user} lacks authority."
