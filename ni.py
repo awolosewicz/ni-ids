@@ -619,7 +619,7 @@ class NICmd(cmd.Cmd):
             session: int,
             data,
             quiet: bool = False,
-            user: str = None) -> None:
+            user: str = None) -> bool:
         """
         Send a packet from the current host to the destination host with the given security level.
         """
@@ -630,14 +630,14 @@ class NICmd(cmd.Cmd):
         route_level = self.nicxt.lattice.get_element(route_level_key) if route_level_key else None
         if dest_host is None or route_level is None:
             logging.error(f"Destination host with address {dest} not found or unrouted.")
-            return
+            return False
         if encrypted == 0:
             if not self.nicxt.lattice.less_or_equal(level, route_level):
                 warn_str = f"Unencrypted packet to {dest} with level {level} exceeds route level {route_level}."
                 logging.warning(warn_str)
                 if not quiet:
                     print(warn_str)
-                return
+                return False
         else:
             try:
                 signer = None
@@ -648,7 +648,7 @@ class NICmd(cmd.Cmd):
                             logging.warning(warn_str)
                             if not quiet:
                                 print(warn_str)
-                            return
+                            return False
                     signer = self.nicxt.users[user]
                 else:
                     signer = self.host
@@ -674,6 +674,7 @@ class NICmd(cmd.Cmd):
         send(pkt, verbose=0)
         if not quiet:
             print(f"Packet sent from {self.host.name} to {dest}.")
+        return True
 
     def do_login(self, arg):
         "Login to a given user, resetting environment: login <username>"
@@ -914,10 +915,13 @@ class NICmd(cmd.Cmd):
         dest_host = self.nicxt.hosts[dest_host_name]
         try:
             self.nicxt.assert_level_pc(var.level)
-            self.send_packet(dest_host.address, level=var.level, encrypted=encrypted,
+            ret = self.send_packet(dest_host.address, level=var.level, encrypted=encrypted,
                              pkt_type="WRITE", session=self.session_counter,
                              data={"var_name": var_name, "value": var.value, "vtype": var.vtype},
                              user=self.user.name if self.user else None)
+            if not ret:
+                print(f"Failed to send variable '{var_name}' to host '{dest_host_name}'.")
+                return
             while True:
                 packet = self.shared_queue.get()
                 ni_header = packet[NIHeader]
@@ -947,11 +951,14 @@ class NICmd(cmd.Cmd):
             return
         src_host = self.nicxt.hosts[src_host_name]
         try:
-            self.send_packet(src_host.address, level=self.nicxt.auth_level, encrypted=1,
+            ret = self.send_packet(src_host.address, level=self.nicxt.auth_level, encrypted=1,
                              pkt_type="READ", session=self.session_counter,
                              data={"var_name": var_name},
                              user=self.user.name if self.user else None)
             self.session_counter += 1
+            if not ret:
+                print(f"Failed to send retrieve request for variable '{var_name}' to host '{src_host_name}'.")
+                return
             print(f"Retrieve request for variable '{var_name}' sent to host '{src_host_name}'. Waiting for response...")
             while True:
                 packet = self.shared_queue.get()
