@@ -11,8 +11,11 @@ from ni_header import NIHeader, NIPktType
 import json
 import logging
 import base64
-from nacl.public import PrivateKey, PublicKey, SealedBox
-from nacl.signing import SigningKey, VerifyKey
+from nacl.public import PrivateKey, SealedBox
+from nacl.signing import SigningKey
+import time
+
+PACKET_TIMEOUT_S = 5
 
 class LatticeElement():
     """
@@ -638,6 +641,7 @@ class NICmd(cmd.Cmd):
                 if not quiet:
                     print(warn_str)
                 return False
+            rawdata = rawdata.encode()
         else:
             try:
                 signer = None
@@ -662,8 +666,7 @@ class NICmd(cmd.Cmd):
                 rawdata = json.dumps(payload).encode()
             except Exception as e:
                 logging.error(f"Failed to encrypt/sign payload: {e}")
-                return
-            rawdata = rawdata.encode()
+                return False
 
         if type(dest) == IPv4Address:
             pkt = IP(src=str(self.host.address), dst=str(dest))/NIHeader(level=self.nicxt.lattice.element_ids[str(level)],
@@ -922,7 +925,11 @@ class NICmd(cmd.Cmd):
             if not ret:
                 print(f"Failed to send variable '{var_name}' to host '{dest_host_name}'.")
                 return
+            start = time.time()
             while True:
+                if time.time() - start > PACKET_TIMEOUT_S:
+                    print(f"Timeout waiting for response for variable '{var_name}' sent to host '{dest_host_name}'.")
+                    return
                 packet = self.shared_queue.get()
                 ni_header = packet[NIHeader]
                 if ni_header.session != self.session_counter:
@@ -960,7 +967,11 @@ class NICmd(cmd.Cmd):
                 print(f"Failed to send retrieve request for variable '{var_name}' to host '{src_host_name}'.")
                 return
             print(f"Retrieve request for variable '{var_name}' sent to host '{src_host_name}'. Waiting for response...")
+            start = time.time()
             while True:
+                if time.time() - start > PACKET_TIMEOUT_S:
+                    print(f"Timeout waiting for response for variable '{var_name}' from host '{src_host_name}'.")
+                    return
                 packet = self.shared_queue.get()
                 ni_header = packet[NIHeader]
                 if ni_header.session != self.session_counter - 1:
